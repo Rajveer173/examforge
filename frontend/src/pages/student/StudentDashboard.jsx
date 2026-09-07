@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { BookOpen, FileText, Trophy } from 'lucide-react';
+import { BookOpen, Code2, FileText, Trophy } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -21,12 +21,13 @@ import { axisProps, tooltipProps, useChartColors } from '../_shared/chart.js';
 export function StudentDashboard() {
   const colors = useChartColors();
 
-  const [assigned, results, assignments, myCourses] = useQueries({
+  const [assigned, results, assignments, myCourses, coding] = useQueries({
     queries: [
       { queryKey: ['tests', 'assigned'], queryFn: () => getData('/tests/assigned'), retry: retryUnlessDenied },
       { queryKey: ['results', 'my'], queryFn: () => getData('/results/my?limit=50'), retry: retryUnlessDenied },
       { queryKey: ['assignments', 'student'], queryFn: () => getData('/assignments?limit=20'), retry: retryUnlessDenied },
       { queryKey: ['my-courses'], queryFn: () => getData('/my-courses'), retry: retryUnlessDenied },
+      { queryKey: ['coding', 'problems'], queryFn: () => getData('/coding-problems'), retry: retryUnlessDenied },
     ],
   });
 
@@ -37,8 +38,8 @@ export function StudentDashboard() {
     staleTime: 60_000,
   });
 
-  const loading = [assigned, results, assignments, myCourses].some((q) => q.isPending);
-  const failed = [assigned, results, assignments, myCourses].find((q) => q.isError);
+  const loading = [assigned, results, assignments, myCourses, coding].some((q) => q.isPending);
+  const failed = [assigned, results, assignments, myCourses, coding].find((q) => q.isError);
 
   if (failed) {
     return (
@@ -46,7 +47,7 @@ export function StudentDashboard() {
         <PageHeader eyebrow="Learning" title="Dashboard" />
         <ErrorAlert
           error={failed.error}
-          onRetry={() => [assigned, results, assignments, myCourses].forEach((q) => q.refetch())}
+          onRetry={() => [assigned, results, assignments, myCourses, coding].forEach((q) => q.refetch())}
         />
       </div>
     );
@@ -56,6 +57,7 @@ export function StudentDashboard() {
   const resultItems = results.data?.items ?? [];
   const assignmentItems = assignments.data?.items ?? [];
   const enrollments = myCourses.data?.enrollments ?? [];
+  const codingItems = coding.data?.items ?? [];
 
   const openNow = tests.filter((t) => t.canAttempt);
   const scored = resultItems.filter((r) => r.percentage !== null);
@@ -94,6 +96,9 @@ export function StudentDashboard() {
         description="Tests open to you now, your recent scores and where you left off."
         actions={
           <div className="flex gap-2">
+            <Button as={Link} to="/student/coding-problems" variant="secondary">
+              Coding problems
+            </Button>
             <Button as={Link} to="/student/progress" variant="secondary">
               My progress
             </Button>
@@ -306,6 +311,69 @@ export function StudentDashboard() {
           )}
         </Panel>
       </div>
+
+      <Panel
+        title="Coding challenges"
+        description={
+          codingItems.length > 0
+            ? `${formatNumber(codingItems.length)} problems available for practice`
+            : 'Practice problems published by your instructors'
+        }
+        action={
+          <Link className="link text-sm" to="/student/coding-problems">
+            All problems
+          </Link>
+        }
+      >
+        {codingItems.length === 0 ? (
+          <EmptyState
+            title="No coding problems yet"
+            description="Once an instructor publishes a coding problem, it appears here to solve."
+          />
+        ) : (
+          <Table
+            dense
+            head={[
+              { key: 'title', label: 'Problem' },
+              { key: 'difficulty', label: 'Difficulty' },
+              { key: 'limit', label: 'Time limit', align: 'right' },
+              { key: 'action', label: '', align: 'right' },
+            ]}
+          >
+            {codingItems.slice(0, 5).map((problem) => (
+              <tr key={problem.id}>
+                <td>
+                  <Link className="link font-medium" to={`/student/coding-problems/${problem.id}`}>
+                    {problem.title}
+                  </Link>
+                  <p className="max-w-md truncate text-xs text-ink-subtle">{problem.description}</p>
+                </td>
+                <td>
+                  <Badge
+                    tone={
+                      problem.difficulty === 'EASY'
+                        ? 'positive'
+                        : problem.difficulty === 'MEDIUM'
+                          ? 'caution'
+                          : 'critical'
+                    }
+                  >
+                    {problem.difficulty}
+                  </Badge>
+                </td>
+                <td className="tabular text-right text-ink-muted">
+                  {(Number(problem.timeLimitMs ?? 0) / 1000).toFixed(1)}s
+                </td>
+                <td className="text-right">
+                  <Button as={Link} to={`/student/coding-problems/${problem.id}`} size="sm" variant="secondary">
+                    <Code2 className="size-4" /> Solve
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Panel>
 
       {upcomingAssignments.length > 0 && (
         <Panel

@@ -61,6 +61,7 @@ const ProctoringDashboard = page(() => import('../pages/proctoring/ProctoringDas
 const AiAssistantPage = page(() => import('../pages/ai/AiAssistantPage.jsx'), 'AiAssistantPage');
 const SearchResultsPage = page(() => import('../pages/search/SearchResultsPage.jsx'), 'SearchResultsPage');
 const OrganizationsPage = page(() => import('../pages/organizations/OrganizationsPage.jsx'), 'OrganizationsPage');
+const SettingsPage = page(() => import('../pages/SettingsPage.jsx'), 'SettingsPage');
 
 export const roleHome = {
   ADMIN: '/admin',
@@ -95,6 +96,7 @@ export function AppRoutes() {
         {/* Profile previously sat outside AppLayout, so it rendered with no
             sidebar or header and stranded the user with no way back. */}
         <Route path="/profile" element={guard(ALL_ROLES, <ProfilePage />)} />
+        <Route path="/settings" element={guard(ALL_ROLES, <SettingsPage />)} />
 
         {/* One canonical notifications route for every role. The header bell used
             to build `/{role}/notifications`, which 404'd for PROCTOR because no

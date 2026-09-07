@@ -32,7 +32,7 @@ export function StudentCodingProblemsPage() {
           <Link key={p.id} to={`/student/coding-problems/${p.id}`} className="card p-5 transition-colors hover:border-accent/30">
             <div className="flex items-start justify-between">
               <h3 className="font-semibold text-ink">{p.title}</h3>
-              <Badge tone={p.difficulty === 'EASY' ? 'green' : p.difficulty === 'MEDIUM' ? 'amber' : 'red'}>
+              <Badge tone={p.difficulty === 'EASY' ? 'positive' : p.difficulty === 'MEDIUM' ? 'caution' : 'critical'}>
                 {p.difficulty}
               </Badge>
             </div>

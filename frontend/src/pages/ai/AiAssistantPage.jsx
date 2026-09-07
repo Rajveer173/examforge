@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { api } from '../../api/client.js';
-import { ErrorAlert, Spinner } from '../../components/ui.jsx';
+import { ConfirmDialog, ErrorAlert, Spinner } from '../../components/ui.jsx';
 
 export function AiAssistantPage() {
   const [conversations, setConversations] = useState(null);
@@ -9,6 +10,7 @@ export function AiAssistantPage() {
   const [input, setInput] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const bottomRef = useRef(null);
 
   const loadConversations = () =>
@@ -59,6 +61,22 @@ export function AiAssistantPage() {
     }
   };
 
+  const deleteConversation = async () => {
+    if (!confirmDelete) return;
+    try {
+      await api.delete(`/ai/conversations/${confirmDelete.id}`);
+      if (active?.id === confirmDelete.id) {
+        setActive(null);
+        setMessages([]);
+      }
+      await loadConversations();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
   if (error) return <ErrorAlert error={error} />;
   if (!conversations) return <Spinner label="Loading AI assistant…" />;
 
@@ -76,16 +94,24 @@ export function AiAssistantPage() {
         <div className="hidden space-y-1 overflow-y-auto rounded-xl border border-line bg-surface p-2 lg:block">
           {conversations.length === 0 && <p className="p-2 text-sm text-ink-subtle">No conversations yet.</p>}
           {conversations.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setActive(c)}
-              className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                active?.id === c.id ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-canvas'
-              }`}
-            >
-              <p className="line-clamp-1 font-medium">{c.title || 'Untitled'}</p>
-              <p className="text-xs text-ink-subtle">{new Date(c.updatedAt).toLocaleDateString()}</p>
-            </button>
+            <div key={c.id} className="group relative">
+              <button
+                onClick={() => setActive(c)}
+                className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm ${
+                  active?.id === c.id ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-canvas'
+                }`}
+              >
+                <p className="line-clamp-1 font-medium">{c.title || 'Untitled'}</p>
+                <p className="text-xs text-ink-subtle">{new Date(c.updatedAt).toLocaleDateString()}</p>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfirmDelete(c); }}
+                className="absolute right-1 top-1 hidden h-6 w-6 items-center justify-center rounded text-ink-subtle hover:bg-critical-soft hover:text-critical-ink group-hover:flex"
+                aria-label={`Delete ${c.title || 'conversation'}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
 
@@ -131,6 +157,15 @@ export function AiAssistantPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={deleteConversation}
+        title="Delete conversation?"
+        description="This conversation and all its messages will be permanently removed."
+        confirmLabel="Delete"
+      />
     </div>
   );
 }

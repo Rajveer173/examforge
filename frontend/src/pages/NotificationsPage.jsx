@@ -42,13 +42,13 @@ export function NotificationsPage() {
   if (!data) return <Spinner />;
 
   const typeTone = {
-    TEST_ASSIGNED: 'blue',
-    TEST_REMINDER: 'amber',
-    ASSIGNMENT_ASSIGNED: 'violet',
-    ASSIGNMENT_DEADLINE: 'red',
-    RESULT_PUBLISHED: 'green',
-    TEACHER_FEEDBACK: 'green',
-    SYSTEM: 'slate',
+    TEST_ASSIGNED: 'info',
+    TEST_REMINDER: 'caution',
+    ASSIGNMENT_ASSIGNED: 'accent',
+    ASSIGNMENT_DEADLINE: 'critical',
+    RESULT_PUBLISHED: 'positive',
+    TEACHER_FEEDBACK: 'positive',
+    SYSTEM: 'neutral',
   };
 
   return (

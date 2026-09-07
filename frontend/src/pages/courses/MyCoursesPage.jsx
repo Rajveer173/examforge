@@ -35,7 +35,7 @@ export function MyCoursesPage() {
                 <div className="flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="font-semibold text-ink">{c.name}</h3>
-                    <Badge tone="blue">{c.code}</Badge>
+                    <Badge tone="info">{c.code}</Badge>
                   </div>
                   <div className="mt-2 flex gap-3 text-xs text-ink-muted">
                     <span>{c._count?.modules ?? 0} modules</span>

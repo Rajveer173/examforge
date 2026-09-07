@@ -72,7 +72,7 @@ export function SearchResultsPage() {
                   <div key={r.id} className="card p-4">
                     <div className="flex items-center justify-between">
                       <p className="font-medium text-ink">{r.title}</p>
-                      <Badge tone={r.status === 'PUBLISHED' ? 'green' : 'slate'}>{r.status}</Badge>
+                      <Badge tone={r.status === 'PUBLISHED' ? 'positive' : 'neutral'}>{r.status}</Badge>
                     </div>
                     {r.description && <p className="mt-1 text-sm text-ink-muted line-clamp-2">{r.description}</p>}
                   </div>
@@ -86,8 +86,8 @@ export function SearchResultsPage() {
                     <p className="font-medium text-ink">{r.text}</p>
                     <div className="mt-2 flex gap-2">
                       <Badge>{r.type}</Badge>
-                      <Badge tone="amber">{r.difficulty}</Badge>
-                      {r.topic && <Badge tone="blue">{r.topic}</Badge>}
+                      <Badge tone="caution">{r.difficulty}</Badge>
+                      {r.topic && <Badge tone="info">{r.topic}</Badge>}
                     </div>
                   </div>
                 ))}
@@ -121,7 +121,7 @@ export function SearchResultsPage() {
                 {data.lessons.map((r) => (
                   <div key={r.id} className="card flex items-center justify-between p-4">
                     <p className="font-medium text-ink">{r.title}</p>
-                    <Badge tone="amber">{r.type}</Badge>
+                    <Badge tone="caution">{r.type}</Badge>
                   </div>
                 ))}
               </Section>

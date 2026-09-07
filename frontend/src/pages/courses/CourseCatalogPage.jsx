@@ -51,7 +51,7 @@ export function CourseCatalogPage() {
               <div className="flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="text-lg font-semibold text-ink">{c.name}</h3>
-                  <Badge tone="blue">{c.code}</Badge>
+                  <Badge tone="info">{c.code}</Badge>
                 </div>
                 {c.description && <p className="mt-2 text-sm text-ink-muted line-clamp-3">{c.description}</p>}
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink-muted">

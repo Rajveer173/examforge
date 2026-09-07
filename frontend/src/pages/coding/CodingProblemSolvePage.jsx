@@ -56,8 +56,8 @@ export function CodingProblemSolvePage() {
         <div>
           <h1 className="text-2xl font-bold text-ink">{problem.title}</h1>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Badge tone={problem.difficulty === 'EASY' ? 'green' : problem.difficulty === 'MEDIUM' ? 'amber' : 'red'}>{problem.difficulty}</Badge>
-            <Badge tone="blue">{language}</Badge>
+            <Badge tone={problem.difficulty === 'EASY' ? 'positive' : problem.difficulty === 'MEDIUM' ? 'caution' : 'critical'}>{problem.difficulty}</Badge>
+            <Badge tone="info">{language}</Badge>
             <span className="text-xs text-ink-subtle">{(problem.timeLimitMs / 1000).toFixed(1)}s limit</span>
           </div>
         </div>
@@ -133,7 +133,7 @@ export function CodingProblemSolvePage() {
                     <p className="text-sm font-medium text-ink">{s.language}</p>
                     <p className="text-xs text-ink-subtle">{new Date(s.createdAt).toLocaleString()}</p>
                   </div>
-                  <Badge tone={s.status === 'ACCEPTED' ? 'green' : s.status === 'ERROR' ? 'red' : 'amber'}>
+                  <Badge tone={s.status === 'ACCEPTED' ? 'positive' : s.status === 'ERROR' ? 'critical' : 'caution'}>
                     {s.status}
                   </Badge>
                 </div>

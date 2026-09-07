@@ -9,14 +9,12 @@ const staffOnly = requireRole('ADMIN', 'TEACHER');
 
 export const testSectionRouter = Router();
 
-testSectionRouter.use(requireAuth, staffOnly);
-
-testSectionRouter.get('/tests/:testId/sections', asyncHandler(async (req, res) => {
+testSectionRouter.get('/tests/:testId/sections', requireAuth, staffOnly, asyncHandler(async (req, res) => {
   const sections = await testSectionService.listSections(req.params.testId);
   res.json({ success: true, data: { sections } });
 }));
 
-testSectionRouter.post('/tests/:testId/sections', asyncHandler(async (req, res) => {
+testSectionRouter.post('/tests/:testId/sections', requireAuth, staffOnly, asyncHandler(async (req, res) => {
   const schema = z.object({
     title: z.string().min(1).max(200),
     description: z.string().max(2000).optional(),
@@ -28,7 +26,7 @@ testSectionRouter.post('/tests/:testId/sections', asyncHandler(async (req, res) 
   res.status(201).json({ success: true, data: { section } });
 }));
 
-testSectionRouter.put('/sections/:id', asyncHandler(async (req, res) => {
+testSectionRouter.put('/sections/:id', requireAuth, staffOnly, asyncHandler(async (req, res) => {
   const schema = z.object({
     title: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).optional(),
@@ -40,12 +38,12 @@ testSectionRouter.put('/sections/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { section } });
 }));
 
-testSectionRouter.delete('/sections/:id', asyncHandler(async (req, res) => {
+testSectionRouter.delete('/sections/:id', requireAuth, staffOnly, asyncHandler(async (req, res) => {
   await testSectionService.deleteSection(req.params.id);
   res.json({ success: true, data: null });
 }));
 
-testSectionRouter.put('/tests/:testId/sections/reorder', asyncHandler(async (req, res) => {
+testSectionRouter.put('/tests/:testId/sections/reorder', requireAuth, staffOnly, asyncHandler(async (req, res) => {
   const schema = z.object({ sectionIds: z.array(z.string()).min(1) });
   const { sectionIds } = schema.parse(req.body);
   const result = await testSectionService.reorderSections(req.params.testId, sectionIds);

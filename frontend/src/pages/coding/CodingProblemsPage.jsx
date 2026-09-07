@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../api/client.js';
-import { Badge, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner } from '../../components/ui.jsx';
+import { Badge, Button, ConfirmDialog, Drawer, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner } from '../../components/ui.jsx';
+import { useToast } from '../../components/toast.jsx';
 
 const difficulties = ['EASY', 'MEDIUM', 'HARD', 'EXPERT'];
 
@@ -21,6 +23,12 @@ export function CodingProblemsPage() {
   });
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [testCaseProblem, setTestCaseProblem] = useState(null);
+  const [testCases, setTestCases] = useState([]);
+  const [tcBusy, setTcBusy] = useState(false);
+  const [newTestCase, setNewTestCase] = useState({ input: '', expectedOutput: '', isPublic: true });
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const toast = useToast();
 
   const load = () =>
     Promise.all([
@@ -86,12 +94,54 @@ export function CodingProblemsPage() {
   };
 
   const remove = async (p) => {
-    if (!window.confirm(`Delete problem "${p.title}"?`)) return;
+    setConfirmDelete(p);
+  };
+
+  const confirmRemove = async () => {
+    if (!confirmDelete) return;
     try {
-      await api.delete(`/coding-problems/${p.id}`);
+      await api.delete(`/coding-problems/${confirmDelete.id}`);
       await load();
+      toast.success('Problem deleted');
     } catch (err) {
       setError(err);
+    }
+    setConfirmDelete(null);
+  };
+
+  const openTestCases = async (problem) => {
+    setTestCaseProblem(problem);
+    try {
+      const { data } = await api.get(`/coding-problems/${problem.id}`);
+      setTestCases(data.data.problem.testCases || []);
+      setNewTestCase({ input: '', expectedOutput: '', isPublic: true });
+    } catch (err) {
+      setError(err);
+    }
+  };
+
+  const addTestCase = async () => {
+    if (!testCaseProblem || !newTestCase.input) return;
+    setTcBusy(true);
+    try {
+      const { data } = await api.post(`/coding-problems/${testCaseProblem.id}/testcases`, newTestCase);
+      setTestCases((prev) => [...prev, data.data.testCase]);
+      setNewTestCase({ input: '', expectedOutput: '', isPublic: true });
+      toast.success('Test case added');
+    } catch (err) {
+      toast.error(err?.response?.data?.message ?? 'Failed to add test case');
+    }
+    setTcBusy(false);
+  };
+
+  const removeTestCase = async (testCaseId) => {
+    if (!testCaseProblem) return;
+    try {
+      await api.delete(`/coding-problems/${testCaseProblem.id}/testcases/${testCaseId}`);
+      setTestCases((prev) => prev.filter((tc) => tc.id !== testCaseId));
+      toast.success('Test case removed');
+    } catch (err) {
+      toast.error('Failed to remove test case');
     }
   };
 
@@ -119,7 +169,7 @@ export function CodingProblemsPage() {
           <div key={p.id} className="card p-5">
             <div className="flex items-start justify-between">
               <h3 className="font-semibold text-ink">{p.title}</h3>
-              <Badge tone={p.difficulty === 'EASY' ? 'green' : p.difficulty === 'MEDIUM' ? 'amber' : 'red'}>
+              <Badge tone={p.difficulty === 'EASY' ? 'positive' : p.difficulty === 'MEDIUM' ? 'caution' : 'critical'}>
                 {p.difficulty}
               </Badge>
             </div>
@@ -134,14 +184,21 @@ export function CodingProblemsPage() {
               <span>{(p.timeLimitMs / 1000).toFixed(1)}s limit</span>
             </div>
             <div className="mt-3 flex gap-2">
-              <button onClick={() => openEdit(p)} className="btn btn-ghost flex-1">Edit</button>
-              <button onClick={() => remove(p)} className="btn btn-danger flex-1">Delete</button>
+              <Button variant="ghost" size="sm" onClick={() => openTestCases(p)}>
+                Test Cases
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
+                Edit
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => remove(p)}>
+                Delete
+              </Button>
             </div>
           </div>
         ))}
       </div>
 
-      <Modal open={Boolean(modal)} onClose={() => setModal(null)} title={modal === 'create' ? 'New Coding Problem' : 'Edit Coding Problem'} width="max-w-2xl">
+      <Modal open={Boolean(modal)} onClose={() => setModal(null)} title={modal === 'create' ? 'New Coding Problem' : 'Edit Coding Problem'} width="lg">
         <div className="space-y-4">
           {formError && <div className="rounded-lg bg-critical-soft px-3 py-2 text-sm text-critical-ink">{formError}</div>}
           <Field label="Title">
@@ -172,38 +229,106 @@ export function CodingProblemsPage() {
             </Field>
           </div>
 
-          <div>
-            <p className="label">Test Cases</p>
-            <div className="space-y-2">
-              {form.testCases.map((tc, i) => (
-                <div key={i} className="rounded-lg border border-line p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-medium text-ink-muted">Case #{i + 1}</span>
-                    <label className="flex items-center gap-1 text-xs text-ink-muted">
-                      <input type="checkbox" checked={tc.isPublic} onChange={(e) => setTestCase(i, { isPublic: e.target.checked })} />
-                      Public
-                    </label>
+          {modal === 'create' && (
+            <div>
+              <p className="label">Test Cases</p>
+              <div className="space-y-2">
+                {form.testCases.map((tc, i) => (
+                  <div key={i} className="rounded-lg border border-line p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-medium text-ink-muted">Case #{i + 1}</span>
+                      <label className="flex items-center gap-1 text-xs text-ink-muted">
+                        <input type="checkbox" checked={tc.isPublic} onChange={(e) => setTestCase(i, { isPublic: e.target.checked })} />
+                        Public
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className="input" placeholder="Input" value={tc.input} onChange={(e) => setTestCase(i, { input: e.target.value })} />
+                      <input className="input" placeholder="Expected output" value={tc.expectedOutput} onChange={(e) => setTestCase(i, { expectedOutput: e.target.value })} />
+                    </div>
+                    <button className="mt-2 text-xs text-critical-ink hover:underline" onClick={() => setForm((f) => ({ ...f, testCases: f.testCases.filter((_, j) => j !== i) }))}>
+                      Remove
+                    </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input className="input" placeholder="Input" value={tc.input} onChange={(e) => setTestCase(i, { input: e.target.value })} />
-                    <input className="input" placeholder="Expected output" value={tc.expectedOutput} onChange={(e) => setTestCase(i, { expectedOutput: e.target.value })} />
-                  </div>
-                  <button className="mt-2 text-xs text-critical-ink hover:underline" onClick={() => setForm((f) => ({ ...f, testCases: f.testCases.filter((_, j) => j !== i) }))}>
-                    Remove
-                  </button>
-                </div>
-              ))}
-              <button className="btn btn-ghost w-full" onClick={() => setForm((f) => ({ ...f, testCases: [...f.testCases, { input: '', expectedOutput: '', isPublic: true }] }))}>
-                + Add Test Case
-              </button>
+                ))}
+                <button className="btn btn-ghost w-full" onClick={() => setForm((f) => ({ ...f, testCases: [...f.testCases, { input: '', expectedOutput: '', isPublic: true }] }))}>
+                  + Add Test Case
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <button onClick={save} disabled={busy || !form.title || !form.description} className="btn btn-primary w-full">
             {busy ? 'Saving…' : modal === 'create' ? 'Create Problem' : 'Save Changes'}
           </button>
         </div>
       </Modal>
+
+      <Drawer
+        open={Boolean(testCaseProblem)}
+        onClose={() => setTestCaseProblem(null)}
+        title={`Test Cases — ${testCaseProblem?.title ?? ''}`}
+        description="Manage test cases for this coding problem."
+        width="lg"
+      >
+        <div className="space-y-4">
+          <div className="space-y-3">
+            {testCases.length === 0 && <p className="text-sm text-ink-subtle">No test cases yet. Add one below.</p>}
+            {testCases.map((tc) => (
+              <div key={tc.id} className="rounded-lg border border-line p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-ink-muted">
+                    Case #{testCases.indexOf(tc) + 1} {tc.isPublic ? '(Public)' : '(Hidden)'}
+                  </span>
+                  <Button variant="ghost" size="sm" icon={Trash2} onClick={() => removeTestCase(tc.id)}>
+                    Remove
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="font-medium text-ink-subtle">Input:</span>
+                    <pre className="mt-1 rounded bg-canvas p-2 whitespace-pre-wrap">{tc.input}</pre>
+                  </div>
+                  <div>
+                    <span className="font-medium text-ink-subtle">Expected:</span>
+                    <pre className="mt-1 rounded bg-canvas p-2 whitespace-pre-wrap">{tc.expectedOutput}</pre>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-lg border border-dashed border-line-strong p-4">
+            <p className="mb-3 text-sm font-medium text-ink">Add Test Case</p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Input">
+                  <textarea className="input" rows={3} value={newTestCase.input} onChange={(e) => setNewTestCase({ ...newTestCase, input: e.target.value })} placeholder="Test input" />
+                </Field>
+                <Field label="Expected Output">
+                  <textarea className="input" rows={3} value={newTestCase.expectedOutput} onChange={(e) => setNewTestCase({ ...newTestCase, expectedOutput: e.target.value })} placeholder="Expected output" />
+                </Field>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input type="checkbox" checked={newTestCase.isPublic} onChange={(e) => setNewTestCase({ ...newTestCase, isPublic: e.target.checked })} />
+                Public (visible to students)
+              </label>
+              <Button onClick={addTestCase} loading={tcBusy} disabled={!newTestCase.input} icon={Plus}>
+                Add Test Case
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Drawer>
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={confirmRemove}
+        title={`Delete "${confirmDelete?.title}"?`}
+        description="This will permanently remove the problem and all its test cases."
+        confirmLabel="Delete"
+      />
     </div>
   );
 }

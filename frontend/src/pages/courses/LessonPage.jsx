@@ -37,7 +37,7 @@ export function LessonPage() {
         <button onClick={() => navigate(-1)} className="mb-3 text-sm text-accent hover:underline">&larr; Back</button>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold text-ink">{lesson.title}</h1>
-          <Badge tone={lesson.type === 'video' ? 'violet' : lesson.type === 'pdf' ? 'red' : 'slate'}>{lesson.type}</Badge>
+          <Badge tone={lesson.type === 'video' ? 'accent' : lesson.type === 'pdf' ? 'critical' : 'neutral'}>{lesson.type}</Badge>
           {lesson.durationMin && <span className="text-sm text-ink-muted">{lesson.durationMin} min</span>}
         </div>
         {lesson.module && <p className="mt-1 text-sm text-ink-muted">{lesson.module.title}</p>}

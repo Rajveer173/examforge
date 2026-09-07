@@ -469,6 +469,13 @@ const BADGE_TONES = {
   caution: 'bg-caution-soft text-caution-ink ring-caution/30',
   critical: 'bg-critical-soft text-critical-ink ring-critical/30',
   info: 'bg-info-soft text-info-ink ring-info/30',
+  blue: 'bg-info-soft text-info-ink ring-info/30',
+  green: 'bg-positive-soft text-positive-ink ring-positive/30',
+  amber: 'bg-caution-soft text-caution-ink ring-caution/30',
+  red: 'bg-critical-soft text-critical-ink ring-critical/30',
+  violet: 'bg-accent-soft text-accent-ink ring-accent/30',
+  slate: 'bg-surface-sunken text-ink-muted ring-line-strong',
+  brand: 'bg-accent-soft text-accent-ink ring-accent/30',
 };
 
 const BADGE_DOTS = {
@@ -478,6 +485,13 @@ const BADGE_DOTS = {
   caution: 'bg-caution',
   critical: 'bg-critical',
   info: 'bg-info',
+  blue: 'bg-info',
+  green: 'bg-positive',
+  amber: 'bg-caution',
+  red: 'bg-critical',
+  violet: 'bg-accent',
+  slate: 'bg-ink-subtle',
+  brand: 'bg-accent',
 };
 
 export function Badge({ children, tone = 'neutral', dot = false, className }) {

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { useAuthStore } from '../store/authStore.js';
-import { Badge, ErrorAlert, Field, PageHeader, Spinner } from '../components/ui.jsx';
+import { Badge, Button, ConfirmDialog, ErrorAlert, Field, PageHeader, Spinner } from '../components/ui.jsx';
 import { useToast } from '../components/toast.jsx';
+import { formatDateTime } from '../lib/format.js';
 
 export function ProfilePage() {
   const { user, fetchMe } = useAuthStore();
@@ -21,6 +22,10 @@ export function ProfilePage() {
     disableCode: '',
   });
   const [loginHistory, setLoginHistory] = useState(null);
+  const [sessions, setSessions] = useState(null);
+  const [confirmRevoke, setConfirmRevoke] = useState(null);
+  const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   if (!user) return <Spinner />;
 
@@ -102,6 +107,43 @@ export function ProfilePage() {
     }
   };
 
+  const loadSessions = async () => {
+    try {
+      const { data } = await api.get('/auth/sessions');
+      setSessions(data.data);
+    } catch (err) {
+      setError(err);
+    }
+  };
+
+  const revokeSession = async (id) => {
+    setRevoking(true);
+    try {
+      await api.delete(`/auth/sessions/${id}`);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      toast.success('Session revoked');
+    } catch (err) {
+      toast.error('Failed to revoke session');
+    } finally {
+      setRevoking(false);
+      setConfirmRevoke(null);
+    }
+  };
+
+  const revokeAllSessions = async () => {
+    setRevoking(true);
+    try {
+      await api.delete('/auth/sessions');
+      setSessions((prev) => prev.filter((s) => s.current));
+      toast.success('All other sessions revoked');
+    } catch (err) {
+      toast.error('Failed to revoke sessions');
+    } finally {
+      setRevoking(false);
+      setConfirmRevokeAll(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl">
       <PageHeader title="Profile" description="Manage your account settings." />
@@ -131,7 +173,7 @@ export function ProfilePage() {
       <div className="card mb-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">Two-factor authentication</h2>
-          <Badge tone={user.twoFactorEnabled ? 'green' : 'slate'}>
+          <Badge tone={user.twoFactorEnabled ? 'positive' : 'neutral'}>
             {user.twoFactorEnabled ? 'Enabled' : 'Disabled'}
           </Badge>
         </div>
@@ -200,7 +242,7 @@ export function ProfilePage() {
       <div className="card mb-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">Login history</h2>
-          <button onClick={loadLoginHistory} className="btn btn-ghost">View history</button>
+          <Button variant="ghost" size="sm" onClick={loadLoginHistory}>View history</Button>
         </div>
         {loginHistory === null ? (
           <p className="text-sm text-ink-muted">Click "View history" to see your recent sign-ins.</p>
@@ -214,7 +256,44 @@ export function ProfilePage() {
                   <p className="font-medium text-ink">{h.ipAddress} · {h.userAgent || 'Unknown device'}</p>
                   <p className="text-xs text-ink-muted">{new Date(h.createdAt).toLocaleString()}</p>
                 </div>
-                <Badge tone={h.success ? 'green' : 'red'}>{h.success ? 'Success' : 'Failed'}</Badge>
+                <Badge tone={h.success ? 'positive' : 'critical'}>{h.success ? 'Success' : 'Failed'}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card mb-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">Active Sessions</h2>
+          {sessions && sessions.length > 1 && (
+            <Button variant="danger" size="sm" onClick={() => setConfirmRevokeAll(true)}>
+              Revoke all others
+            </Button>
+          )}
+        </div>
+        {!sessions && (
+          <Button variant="ghost" size="sm" onClick={loadSessions}>View sessions</Button>
+        )}
+        {sessions && sessions.length === 0 && (
+          <p className="text-sm text-ink-subtle">No active sessions found.</p>
+        )}
+        {sessions && sessions.length > 0 && (
+          <div className="space-y-2">
+            {sessions.map((s) => (
+              <div key={s.id} className="flex items-center justify-between rounded-lg bg-canvas px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink">{s.userAgent || 'Unknown device'}</p>
+                  <p className="text-xs text-ink-muted">{s.ipAddress || 'Unknown IP'} · {s.createdAt ? formatDateTime(s.createdAt) : ''}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {s.current && <Badge tone="positive">Current</Badge>}
+                  {!s.current && (
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmRevoke(s)}>
+                      Revoke
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -261,6 +340,26 @@ export function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(confirmRevoke)}
+        onClose={() => setConfirmRevoke(null)}
+        onConfirm={() => revokeSession(confirmRevoke.id)}
+        loading={revoking}
+        title="Revoke session?"
+        description="This session will be immediately signed out."
+        confirmLabel="Revoke"
+      />
+
+      <ConfirmDialog
+        open={confirmRevokeAll}
+        onClose={() => setConfirmRevokeAll(false)}
+        onConfirm={revokeAllSessions}
+        loading={revoking}
+        title="Revoke all other sessions?"
+        description="All other devices will be signed out."
+        confirmLabel="Revoke all"
+      />
     </div>
   );
 }

@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { Badge, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner } from '../components/ui.jsx';
 
-const roles = ['ADMIN', 'TEACHER', 'STUDENT'];
+const roles = ['ADMIN', 'TEACHER', 'STUDENT', 'PROCTOR'];
 const roleTone = {
   ADMIN: 'violet',
   TEACHER: 'blue',
   STUDENT: 'green',
+  PROCTOR: 'amber',
 };
 
 const emptyForm = { email: '', username: '', fullName: '', password: '', role: 'STUDENT' };
@@ -106,7 +107,7 @@ export function UsersPage() {
                   </td>
                   <td className="py-3 pr-4"><Badge tone={roleTone[u.role]}>{u.role}</Badge></td>
                   <td className="py-3 pr-4">
-                    {u.isBlocked ? <Badge tone="red">Blocked</Badge> : u.isActive ? <Badge tone="green">Active</Badge> : <Badge tone="amber">Inactive</Badge>}
+                    {u.isBlocked ? <Badge tone="critical">Blocked</Badge> : u.isActive ? <Badge tone="positive">Active</Badge> : <Badge tone="caution">Inactive</Badge>}
                   </td>
                   <td className="py-3 pr-4 text-ink-muted">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}</td>
                   <td className="py-3 text-right whitespace-nowrap">

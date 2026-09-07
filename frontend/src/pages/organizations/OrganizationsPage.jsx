@@ -71,7 +71,7 @@ export function OrganizationsPage() {
             >
               <p className="font-semibold text-ink">{o.name}</p>
               <p className="text-xs text-ink-muted">@{o.slug}</p>
-              {o._count?.members != null && <Badge tone="brand">{o._count.members} members</Badge>}
+              {o._count?.members != null && <Badge tone="accent">{o._count.members} members</Badge>}
             </button>
           ))}
         </div>

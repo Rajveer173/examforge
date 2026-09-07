@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client.js';
-import { Badge, EmptyState, ErrorAlert, PageHeader, Spinner } from '../../components/ui.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner, statusTone } from '../../components/ui.jsx';
+import { useToast } from '../../components/toast.jsx';
 
-const statusTone = (status) => ({
-  ACTIVE: 'green',
-  ENDED: 'slate',
-  FLAGGED: 'red',
-}[status] ?? 'slate');
+const PROCTORING_TONES = {
+  ACTIVE: 'positive',
+  ENDED: 'neutral',
+  FLAGGED: 'critical',
+};
 
 export function ProctoringDashboard() {
   const [sessions, setSessions] = useState(null);
   const [error, setError] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [tests, setTests] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [createForm, setCreateForm] = useState({ testId: '', studentId: '' });
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   const load = () =>
     api.get('/proctoring/sessions/active')
@@ -23,8 +30,44 @@ export function ProctoringDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const loadFormData = async () => {
+    try {
+      const [testRes, studentRes] = await Promise.all([
+        api.get('/tests?limit=100'),
+        api.get('/tests/students/list'),
+      ]);
+      setTests(testRes.data.data.items ?? []);
+      setStudents(studentRes.data.data.students ?? []);
+    } catch (err) {
+      setError(err);
+    }
+  };
+
+  const openCreate = async () => {
+    await loadFormData();
+    setCreateForm({ testId: '', studentId: '' });
+    setShowCreate(true);
+  };
+
+  const createSession = async () => {
+    if (!createForm.testId || !createForm.studentId) return;
+    setBusy(true);
+    try {
+      await api.post('/proctoring/sessions', {
+        testId: createForm.testId,
+        studentId: createForm.studentId,
+      });
+      setShowCreate(false);
+      toast.success('Proctoring session created');
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.message ?? 'Failed to create session');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const endSession = async (s) => {
-    if (!window.confirm('End this proctoring session?')) return;
     try {
       await api.post(`/proctoring/sessions/${s.id}/end`);
       await load();
@@ -35,10 +78,20 @@ export function ProctoringDashboard() {
 
   const alertStudent = async (s) => {
     try {
-      await api.post(`/proctoring/sessions/${s.id}/alert`);
+      await api.post(`/proctoring/sessions/${s.id}/alert`, { message: 'Proctor alert' });
       await load();
     } catch (err) {
       setError(err);
+    }
+  };
+
+  const recomputeSuspicion = async () => {
+    try {
+      await api.post('/proctoring/sessions/recompute-suspicion');
+      await load();
+      toast.success('Suspicion scores recalculated');
+    } catch (err) {
+      toast.error('Failed to recompute suspicion scores');
     }
   };
 
@@ -53,6 +106,16 @@ export function ProctoringDashboard() {
       <PageHeader
         title="Proctoring Dashboard"
         description="Monitor active exam sessions for suspicious activity in real time."
+        actions={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={recomputeSuspicion}>
+              Recalculate Scores
+            </Button>
+            <Button onClick={openCreate}>
+              Create Session
+            </Button>
+          </div>
+        }
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
@@ -76,8 +139,8 @@ export function ProctoringDashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Badge tone={statusTone(s.status)}>{s.status}</Badge>
-                <Badge tone={s.suspicionScore >= 40 ? 'red' : s.suspicionScore > 0 ? 'amber' : 'green'}>
+                <Badge tone={PROCTORING_TONES[s.status] ?? 'neutral'}>{s.status}</Badge>
+                <Badge tone={s.suspicionScore >= 40 ? 'critical' : s.suspicionScore > 0 ? 'caution' : 'positive'}>
                   Suspicion: {Math.round(s.suspicionScore)}%
                 </Badge>
               </div>
@@ -93,19 +156,58 @@ export function ProctoringDashboard() {
             )}
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <button onClick={() => alertStudent(s)} className="btn btn-ghost">Alert Student</button>
-              <button onClick={() => endSession(s)} className="btn btn-danger">End Session</button>
+              <Button variant="ghost" size="sm" onClick={() => alertStudent(s)}>
+                Alert Student
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => endSession(s)}>
+                End Session
+              </Button>
             </div>
           </div>
         ))}
       </div>
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Proctoring Session">
+        <div className="space-y-4">
+          <Field label="Test" required>
+            <select
+              className="input"
+              value={createForm.testId}
+              onChange={(e) => setCreateForm({ ...createForm, testId: e.target.value })}
+            >
+              <option value="">Select a test</option>
+              {tests.map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Student" required>
+            <select
+              className="input"
+              value={createForm.studentId}
+              onChange={(e) => setCreateForm({ ...createForm, studentId: e.target.value })}
+            >
+              <option value="">Select a student</option>
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>{s.fullName || s.username}</option>
+              ))}
+            </select>
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowCreate(false)} disabled={busy}>Cancel</Button>
+            <Button onClick={createSession} loading={busy} disabled={!createForm.testId || !createForm.studentId}>
+              Create Session
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
-function StatCard({ label, value, tone = 'slate' }) {
+function StatCard({ label, value, tone = 'neutral' }) {
   const tones = {
-    slate: 'text-ink',
+    neutral: 'text-ink',
     red: 'text-critical-ink',
     amber: 'text-caution-ink',
   };
