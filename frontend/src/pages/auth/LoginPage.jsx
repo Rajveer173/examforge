@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, CircleCheck } from 'lucide-react';
+import { ArrowLeft, CircleCheck, ShieldCheck } from 'lucide-react';
 import { z } from 'zod';
 import { roleHome } from '../../routes/paths.js';
 import { useAuthStore } from '../../store/authStore.js';
@@ -87,8 +87,13 @@ export function LoginPage() {
   if (stage === 'twoFactor') {
     return (
       <div>
+        {/* The icon chip is the one visual cue that this is a second, distinct
+            stage rather than a re-render of the sign-in form. */}
+        <span className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft text-accent ring-1 ring-inset ring-accent/15">
+          <ShieldCheck className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
+        </span>
         <h1 className="text-display text-ink">Two-factor verification</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
+        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
           Enter the six-digit code from your authenticator app for{' '}
           <span className="font-medium text-ink">{credentialsRef.current?.email}</span>.
         </p>
@@ -145,16 +150,18 @@ export function LoginPage() {
   return (
     <div>
       <h1 className="text-display text-ink">Sign in</h1>
-      <p className="mt-1.5 text-sm text-ink-muted">Use the account issued by your institution.</p>
+      <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+        Use the account issued by your institution.
+      </p>
 
       {justRegistered && (
-        <p className="mt-5 flex items-start gap-2 rounded-md border border-positive/30 bg-positive-soft px-3 py-2.5 text-sm text-positive-ink">
-          <CircleCheck className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+        <p className="mt-6 flex items-start gap-2.5 rounded-xl bg-positive-soft px-4 py-3 text-sm leading-relaxed text-positive-ink ring-1 ring-inset ring-positive/25">
+          <CircleCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           Account created. Check your inbox for the verification link, then sign in.
         </p>
       )}
       {sessionExpired && (
-        <p className="mt-5 rounded-md border border-caution/30 bg-caution-soft px-3 py-2.5 text-sm text-caution-ink">
+        <p className="mt-6 rounded-xl bg-caution-soft px-4 py-3 text-sm leading-relaxed text-caution-ink ring-1 ring-inset ring-caution/25">
           Your session expired. Sign in again to continue where you left off.
         </p>
       )}
@@ -209,7 +216,9 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-7 text-sm text-ink-muted">
+      {/* Sits in its own sunken tray so the secondary route out of this screen
+          is separated from the form without a divider rule. */}
+      <p className="mt-7 rounded-xl bg-surface-sunken/70 px-4 py-3 text-sm leading-relaxed text-ink-muted">
         Studying here and have no account yet?{' '}
         <Link to="/register" className="link">
           Register as a student

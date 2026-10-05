@@ -69,7 +69,7 @@ export function RegisterPage() {
   return (
     <div>
       <h1 className="text-display text-ink">Create a student account</h1>
-      <p className="mt-1.5 text-sm text-ink-muted">
+      <p className="mt-2 text-sm leading-relaxed text-ink-muted">
         Teacher, proctor and administrator accounts are created by your institution.
       </p>
 
@@ -149,7 +149,7 @@ export function RegisterPage() {
         </Button>
       </form>
 
-      <p className="mt-7 text-sm text-ink-muted">
+      <p className="mt-7 rounded-xl bg-surface-sunken/70 px-4 py-3 text-sm leading-relaxed text-ink-muted">
         Already registered?{' '}
         <Link to="/login" className="link">
           Sign in

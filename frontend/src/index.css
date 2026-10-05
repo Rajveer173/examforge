@@ -3,123 +3,166 @@
 @tailwind utilities;
 
 /*
- * Palette. Values are bare "R G B" triplets so Tailwind can apply opacity
- * modifiers (see tailwind.config.js). Light is the base; .dark overrides only
- * the tokens that actually change, which keeps the two themes from drifting.
+ * ============================================================================
+ * ExamForge — "Aperture" design language
+ * ============================================================================
  *
- * Contrast targets held by these values: body ink >= 15:1, ink-muted >= 5.6:1,
- * ink-subtle >= 4.7:1 and every tone-ink on its tone-soft >= 6.2:1, measured
- * against canvas, surface and surface-sunken in both themes.
+ * One full-bleed workspace. Chrome never occupies layout space: navigation and
+ * context float above the content as translucent, blurred, rounded islands.
+ *
+ * Structure is drawn with DEPTH, not with rules. Every element sits on a
+ * numbered layer, and its background, border, blur and shadow follow from that
+ * layer rather than being chosen per component:
+ *
+ *   L0  canvas ............ bg-canvas + .mesh          no border, no shadow
+ *   L1  content cards ..... bg-surface                 border-line   shadow-card
+ *   L2  hover / popover ... bg-surface-raised          border-line   shadow-raised
+ *   L3  floating chrome ... .glass                     glass hairline shadow-dock
+ *   L4  modals / palette .. bg-surface-raised          border-line   shadow-overlay
+ *
+ * That single rule is what makes the depth read as a system instead of as
+ * decoration. Nothing on L1 gets a dock shadow.
+ *
+ * Colour is "Iris": a violet-blue accent over a cool near-white ground, with a
+ * warm amber and a cyan reserved for the canvas mesh. Shadows are violet-tinted
+ * rather than neutral grey — a grey shadow over this canvas reads as dirt.
+ *
+ * Values are bare "R G B" triplets so Tailwind opacity modifiers keep working
+ * (see tailwind.config.js). Contrast is verified numerically, not by eye:
+ * ink >= 15:1, ink-muted >= 6.3:1, ink-subtle >= 4.8:1 and every tone-ink on
+ * both its tone-soft and on surface >= 5.8:1, in both themes.
  */
 @layer base {
   :root {
-    /* Warm paper rather than blue-white: long reading sessions on dense tables. */
-    --canvas: 247 246 243;
+    --canvas: 250 250 253;
     --surface: 255 255 255;
     --surface-raised: 255 255 255;
-    --surface-sunken: 240 238 232;
+    --surface-sunken: 244 244 249;
 
-    --line: 226 223 215;
-    --line-strong: 203 199 189;
+    --line: 231 231 240;
+    --line-strong: 210 210 224;
 
-    --ink: 23 26 27;
-    --ink-muted: 89 94 97;
-    --ink-subtle: 100 106 110;
+    --ink: 20 20 31;
+    --ink-muted: 88 88 108;
+    --ink-subtle: 106 106 128;
 
-    --accent: 13 110 100;
-    --accent-hover: 10 88 80;
-    --accent-soft: 224 238 236;
-    --accent-ink: 11 88 80;
+    --accent: 90 79 243;
+    --accent-hover: 74 63 224;
+    --accent-soft: 238 237 255;
+    --accent-ink: 62 52 190;
+    --accent-glow: 90 79 243;
     /* Foreground for filled accent surfaces; the accent flips lightness between
        themes, so the text on top of it cannot be a fixed white. */
     --on-accent: 255 255 255;
 
-    --positive: 21 122 78;
-    --positive-soft: 224 242 232;
-    --positive-ink: 13 93 59;
+    --positive: 14 138 95;
+    --positive-soft: 227 247 238;
+    --positive-ink: 7 107 72;
 
-    --caution: 171 102 7;
-    --caution-soft: 252 240 217;
-    --caution-ink: 129 76 4;
+    --caution: 166 106 0;
+    --caution-soft: 255 241 214;
+    --caution-ink: 126 80 0;
 
-    --critical: 192 44 54;
-    --critical-soft: 253 232 233;
-    --critical-ink: 158 31 41;
+    --critical: 217 45 58;
+    --critical-soft: 255 233 233;
+    --critical-ink: 168 28 40;
     --on-critical: 255 255 255;
 
-    --info: 24 100 182;
-    --info-soft: 225 237 251;
-    --info-ink: 20 82 150;
+    --info: 14 127 168;
+    --info-soft: 224 242 250;
+    --info-ink: 10 98 133;
 
-    --shadow: 28 25 20;
+    /* Violet-tinted, never neutral. */
+    --shadow: 26 22 64;
 
-    /* Always-dark surface for the auth and landing panels. Deliberately NOT
-       redefined under .dark: the panel must stay dark in both themes. */
-    --panel: 16 24 25;
-    --panel-ink: 236 240 239;
+    /* Floating chrome. --glass is the fill, used at alpha under a blur;
+       --glass-line is the hairline that gives the island a lit top edge. */
+    --glass: 255 255 255;
+    --glass-line: 255 255 255;
+    --glass-alpha: 0.72;
+    --glass-line-alpha: 0.7;
+
+    /* The three stops of the canvas mesh. */
+    --mesh-a: 90 79 243;
+    --mesh-b: 255 176 32;
+    --mesh-c: 60 190 230;
+    --mesh-alpha: 0.07;
+
+    /* Always-dark slab for the auth and landing panels. Deliberately NOT
+       redefined under .dark: the slab must stay dark in both themes. */
+    --panel: 13 12 28;
+    --panel-raised: 24 22 48;
+    --panel-ink: 238 238 246;
+    --panel-accent: 154 146 255;
 
     /* Density metrics. data-density on <html> shifts control heights and table
        padding without every component branching on the setting. */
-    --control-sm: 1.75rem;
-    --control-md: 2.125rem;
-    --control-lg: 2.5rem;
-    --cell-y: 0.625rem;
-    --cell-x: 1rem;
+    --control-sm: 1.875rem;
+    --control-md: 2.375rem;
+    --control-lg: 2.875rem;
+    --cell-y: 0.75rem;
+    --cell-x: 1.125rem;
 
     color-scheme: light;
   }
 
   :root[data-density='compact'] {
-    --control-sm: 1.625rem;
-    --control-md: 1.875rem;
-    --control-lg: 2.25rem;
-    --cell-y: 0.375rem;
-    --cell-x: 0.75rem;
+    --control-sm: 1.75rem;
+    --control-md: 2.0625rem;
+    --control-lg: 2.5rem;
+    --cell-y: 0.4375rem;
+    --cell-x: 0.875rem;
   }
 
   .dark {
-    --canvas: 15 18 20;
-    --surface: 22 26 29;
-    --surface-raised: 30 35 39;
-    --surface-sunken: 11 13 15;
+    --canvas: 11 11 16;
+    --surface: 22 22 30;
+    --surface-raised: 30 30 40;
+    --surface-sunken: 8 8 12;
 
-    --line: 44 51 56;
-    --line-strong: 66 75 82;
+    --line: 42 42 55;
+    --line-strong: 64 64 82;
 
-    --ink: 233 237 238;
-    --ink-muted: 163 171 176;
-    --ink-subtle: 140 149 155;
+    --ink: 236 236 244;
+    --ink-muted: 166 166 186;
+    --ink-subtle: 142 142 164;
 
-    --accent: 45 190 172;
-    --accent-hover: 80 212 196;
-    --accent-soft: 19 50 48;
-    --accent-ink: 112 224 208;
-    --on-accent: 12 28 26;
+    --accent: 139 130 255;
+    --accent-hover: 163 156 255;
+    --accent-soft: 34 31 74;
+    --accent-ink: 186 180 255;
+    --accent-glow: 139 130 255;
+    --on-accent: 12 10 40;
 
-    --positive: 56 196 136;
-    --positive-soft: 16 48 35;
-    --positive-ink: 110 225 171;
+    --positive: 61 214 140;
+    --positive-soft: 13 51 38;
+    --positive-ink: 126 231 180;
 
-    --caution: 226 166 54;
-    --caution-soft: 52 39 13;
-    --caution-ink: 240 193 105;
+    --caution: 240 180 74;
+    --caution-soft: 58 42 16;
+    --caution-ink: 247 207 138;
 
-    --critical: 240 110 118;
-    --critical-soft: 58 24 28;
-    --critical-ink: 250 158 164;
-    --on-critical: 32 10 12;
+    --critical: 255 107 107;
+    --critical-soft: 62 29 32;
+    --critical-ink: 255 163 163;
+    --on-critical: 42 15 16;
 
-    --info: 96 165 250;
-    --info-soft: 20 37 62;
-    --info-ink: 147 197 253;
+    --info: 79 195 232;
+    --info-soft: 12 51 65;
+    --info-ink: 150 220 242;
 
     --shadow: 0 0 0;
 
-    color-scheme: dark;
-  }
+    /* On a dark ground the island has to be lighter than the page behind it,
+       and the lit edge has to be far weaker or it reads as a hard outline. */
+    --glass: 40 40 54;
+    --glass-line: 255 255 255;
+    --glass-alpha: 0.66;
+    --glass-line-alpha: 0.12;
 
-  * {
-    border-color: rgb(var(--line));
+    --mesh-alpha: 0.1;
+
+    color-scheme: dark;
   }
 
   html {
@@ -143,7 +186,7 @@
   }
 
   ::selection {
-    @apply bg-accent/20;
+    background-color: rgb(var(--accent) / 0.2);
   }
 
   h1,
@@ -152,75 +195,124 @@
   h4 {
     text-wrap: balance;
   }
+
+  p {
+    text-wrap: pretty;
+  }
 }
 
 @layer components {
+  /* ------------------------------------------------------------- typography
+   *
+   * The display sizes carry their own family, so they live here rather than in
+   * the Tailwind fontSize scale (which cannot set font-family). Classes in
+   * @layer components still accept Tailwind variants, so `sm:text-display-xl`
+   * keeps working.
+   */
+  .text-display-2xl {
+    @apply font-display font-semibold;
+    font-size: clamp(2.75rem, 6vw, 4.5rem);
+    line-height: 1.02;
+    letter-spacing: -0.032em;
+  }
+  .text-display-xl {
+    @apply font-display font-semibold;
+    font-size: clamp(2.25rem, 4.5vw, 3.25rem);
+    line-height: 1.06;
+    letter-spacing: -0.028em;
+  }
+  .text-display-lg {
+    @apply font-display text-[2.5rem] font-semibold leading-[1.1] tracking-[-0.026em];
+  }
+  .text-display {
+    @apply font-display text-[2rem] font-semibold leading-[1.15] tracking-[-0.022em];
+  }
+  .text-title {
+    @apply text-[1.0625rem] font-semibold leading-6 tracking-[-0.014em];
+  }
+
+  .eyebrow {
+    @apply font-mono text-[0.6875rem] font-medium uppercase leading-4 tracking-[0.1em] text-ink-subtle;
+  }
+
+  /* ---------------------------------------------------------------- buttons
+   *
+   * Pill geometry, a lifted resting state for the primary action, and a 1px
+   * translate on press so a click has a physical answer.
+   */
   .btn {
-    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
-           border border-transparent text-sm font-medium
-           transition-[background-color,border-color,color,box-shadow] duration-150
-           disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-full
+           border border-transparent text-sm font-semibold leading-none
+           transition-[background-color,border-color,color,box-shadow,transform] duration-150
+           active:translate-y-px
+           disabled:pointer-events-none disabled:opacity-45 disabled:active:translate-y-0;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
   .btn-sm {
     height: var(--control-sm);
-    @apply px-2.5 text-[0.8125rem];
+    @apply px-3.5 text-[0.8125rem];
   }
   .btn-md {
     height: var(--control-md);
-    @apply px-3;
+    @apply px-4;
   }
   .btn-lg {
     height: var(--control-lg);
-    @apply px-4 text-[0.9375rem];
+    @apply px-6 text-[0.9375rem];
   }
 
   .btn-primary {
-    @apply btn bg-accent text-accent-on shadow-card hover:bg-accent-hover;
+    @apply btn bg-accent text-accent-on shadow-glow hover:bg-accent-hover hover:shadow-glow-lg;
   }
   .btn-secondary {
-    @apply btn border-line-strong bg-surface text-ink shadow-card hover:border-ink-subtle hover:bg-canvas;
+    @apply btn border-line-strong bg-surface text-ink shadow-card hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink;
   }
   .btn-ghost {
-    @apply btn text-ink-muted hover:bg-surface-sunken hover:text-ink;
+    @apply btn text-ink-muted hover:bg-accent-soft hover:text-accent-ink;
   }
   .btn-danger {
-    @apply btn bg-critical text-critical-on shadow-card hover:brightness-95;
+    @apply btn bg-critical text-critical-on hover:brightness-110;
   }
 
+  /* ------------------------------------------------------------------ forms */
   .input {
     height: var(--control-md);
-    @apply w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink
-           transition-colors placeholder:text-ink-subtle
-           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30
+    @apply w-full rounded-xl border border-line-strong bg-surface px-4 text-sm text-ink
+           transition-[border-color,box-shadow] duration-150 placeholder:text-ink-subtle
+           focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15
            disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-ink-subtle;
   }
   textarea.input {
-    @apply h-auto min-h-[5rem] py-2 leading-relaxed;
+    @apply h-auto min-h-[6rem] py-3 leading-relaxed;
   }
   select.input {
-    @apply cursor-pointer pr-8;
+    @apply cursor-pointer pr-9;
   }
 
   .label {
-    @apply mb-1.5 block text-[0.8125rem] font-medium text-ink;
+    @apply mb-2 block text-[0.8125rem] font-semibold leading-5 text-ink;
   }
 
+  /* -------------------------------------------------------------- L1 / card */
   .card {
-    @apply rounded-lg border border-line bg-surface shadow-card;
+    @apply rounded-2xl border border-line bg-surface shadow-card;
   }
   .card-pad {
-    @apply card p-4;
+    @apply card p-6;
   }
-
-  /* Eyebrow: mono, tracked out, used above panel and section content. */
-  .eyebrow {
-    @apply font-mono text-eyebrow uppercase text-ink-subtle;
+  /* L2: the hover answer for anything interactive built on .card. */
+  .card-interactive {
+    @apply card transition-[transform,box-shadow,border-color] duration-200
+           hover:-translate-y-0.5 hover:border-accent/25 hover:shadow-raised;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .link {
-    @apply font-medium text-accent underline-offset-[3px] transition-colors hover:text-accent-hover hover:underline;
+    @apply font-semibold text-accent decoration-accent/30 underline-offset-[3px]
+           transition-colors hover:text-accent-hover hover:decoration-accent-hover/60 hover:underline;
   }
 
+  /* ------------------------------------------------------------------ table */
   .table-shell {
     @apply w-full overflow-x-auto;
   }
@@ -228,8 +320,10 @@
     @apply w-full min-w-[36rem] border-collapse text-sm;
   }
   .table-base thead th {
-    padding: 0.5rem var(--cell-x);
-    @apply sticky top-0 z-[1] border-b border-line bg-surface-sunken text-left font-mono text-eyebrow uppercase text-ink-subtle;
+    padding: 0.625rem var(--cell-x);
+    @apply sticky top-0 z-[1] whitespace-nowrap border-b border-line bg-surface-sunken
+           text-left font-mono text-[0.6875rem] font-medium uppercase leading-4
+           tracking-[0.09em] text-ink-subtle;
   }
   .table-base tbody td {
     padding: var(--cell-y) var(--cell-x);
@@ -239,33 +333,78 @@
     @apply border-b-0;
   }
   .table-base tbody tr {
-    @apply transition-colors hover:bg-surface-sunken/70;
+    @apply transition-colors hover:bg-accent-soft/45;
   }
 }
 
 @layer utilities {
+  /* ------------------------------------------------------------ L3: glass
+   *
+   * The floating-chrome treatment. The inset top highlight is what sells it as
+   * a physical pane rather than a translucent rectangle — it reads as light
+   * catching the top edge.
+   */
+  .glass {
+    background-color: rgb(var(--glass) / var(--glass-alpha));
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgb(var(--glass-line) / var(--glass-line-alpha));
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.28),
+      0 2px 8px -2px rgb(var(--shadow) / 0.10),
+      0 18px 44px -12px rgb(var(--shadow) / 0.22);
+  }
+  .dark .glass {
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.07),
+      0 2px 8px -2px rgb(0 0 0 / 0.5),
+      0 18px 44px -12px rgb(0 0 0 / 0.66);
+  }
+  /* Safari < 18 on some platforms, and any browser with the feature disabled,
+     would otherwise render the island nearly transparent over live content. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background-color: rgb(var(--glass) / 0.97);
+    }
+  }
+
+  /* --------------------------------------------------------- L0: the mesh
+   *
+   * Three large, very low-alpha radial stops. It is a ground, not a poster:
+   * at full size no single bloom should be identifiable as a shape.
+   */
+  .mesh {
+    background-image:
+      radial-gradient(58% 44% at 12% 0%, rgb(var(--mesh-a) / var(--mesh-alpha)) 0%, transparent 62%),
+      radial-gradient(46% 38% at 92% 6%, rgb(var(--mesh-c) / calc(var(--mesh-alpha) * 0.8)) 0%, transparent 60%),
+      radial-gradient(52% 40% at 74% 96%, rgb(var(--mesh-b) / calc(var(--mesh-alpha) * 0.55)) 0%, transparent 64%);
+  }
+
+  /* Same idea scoped to one element, for hero and panel corners. */
+  .accent-wash {
+    background-image: radial-gradient(
+      120% 100% at 100% 0%,
+      rgb(var(--accent) / 0.1) 0%,
+      transparent 62%
+    );
+  }
+
   .scrollbar-slim {
     scrollbar-width: thin;
     scrollbar-color: rgb(var(--line-strong)) transparent;
   }
   .scrollbar-slim::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   .scrollbar-slim::-webkit-scrollbar-thumb {
     background-color: rgb(var(--line-strong));
     border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
   }
   .scrollbar-slim::-webkit-scrollbar-track {
     background: transparent;
-  }
-
-  /* Hairline grid used behind the always-dark panel; it reads as institutional
-     ruling rather than as decoration. */
-  .panel-rule {
-    background-image: linear-gradient(rgb(var(--panel-ink) / 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(var(--panel-ink) / 0.06) 1px, transparent 1px);
-    background-size: 40px 40px;
   }
 
   .shimmer {
@@ -280,10 +419,16 @@
     background-image: linear-gradient(
       90deg,
       transparent,
-      rgb(var(--ink) / 0.05),
+      rgb(var(--ink) / 0.07),
       transparent
     );
     animation: shimmer 1.6s infinite;
+  }
+
+  /* The dock sits above the fold of the content; pages add this so the last
+     row of a table is never parked underneath it. */
+  .pb-dock {
+    padding-bottom: 7.5rem;
   }
 }
 

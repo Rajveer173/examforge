@@ -55,16 +55,46 @@ export const permissionsPolicy = (_req: Request, res: Response, next: NextFuncti
   next();
 };
 
-const originAllowed = (origin: string): boolean => allowedOrigins.includes(origin);
+/**
+ * The origin this very request was addressed to, e.g. "http://localhost:8081".
+ *
+ * `req.protocol` and `req.get('host')` already account for X-Forwarded-Proto and
+ * the Host nginx passes through, bounded by the trust-proxy setting in app.ts.
+ * Returns null when the Host header is missing or malformed, which sends the
+ * caller back to the explicit allowlist rather than guessing.
+ */
+const requestOrigin = (req: Request): string | null => {
+  const host = req.get('host');
+  if (!host) return null;
+  try {
+    return new URL(`${req.protocol}://${host}`).origin;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * An Origin is acceptable when it is on the configured allowlist, or when it is
+ * simply the origin this request was already sent to.
+ *
+ * The second clause is what makes the bundled deployment work. nginx serves the
+ * SPA and reverse-proxies /api on one origin, so a login POST from the app is
+ * same-origin — yet browsers still attach an Origin header to it, and without
+ * this the request was rejected as cross-site unless the deploy port happened to
+ * be listed in CORS_EXTRA_ORIGINS. Matching against the request's own host makes
+ * that work on whatever port the app is actually served from.
+ *
+ * It gives nothing away: a page on attacker.example cannot make the browser send
+ * `Origin: attacker.example` to a request addressed to our host — the Origin
+ * header is set by the browser and is not writable by page script. Anything
+ * genuinely cross-origin still has to be on the allowlist.
+ */
+const originAllowed = (origin: string, req?: Request): boolean => {
+  if (allowedOrigins.includes(origin)) return true;
+  return req ? origin === requestOrigin(req) : false;
+};
 
 export const corsOptions: CorsOptions = {
-  origin(origin, callback) {
-    // Same-origin browser requests and non-browser clients send no Origin.
-    if (!origin) return callback(null, true);
-    if (originAllowed(origin)) return callback(null, true);
-    logger.warn(`Blocked cross-origin request from ${origin}`);
-    callback(new AppError(403, 'Origin not allowed', undefined, 'ORIGIN_BLOCKED'));
-  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
@@ -72,7 +102,21 @@ export const corsOptions: CorsOptions = {
   maxAge: 600,
 };
 
-export const corsMiddleware = cors(corsOptions);
+// The request-aware form of `cors`, so the origin check can see the host the
+// request was addressed to and recognise the same-origin case above.
+export const corsMiddleware = cors((req, callback) => {
+  const origin = req.headers.origin;
+
+  // Non-browser clients (curl, server-to-server) send no Origin at all.
+  if (!origin) return callback(null, { ...corsOptions, origin: true });
+
+  if (originAllowed(origin, req as Request)) {
+    return callback(null, { ...corsOptions, origin: true });
+  }
+
+  logger.warn(`Blocked cross-origin request from ${origin}`);
+  callback(new AppError(403, 'Origin not allowed', undefined, 'ORIGIN_BLOCKED'));
+});
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -98,14 +142,14 @@ export const csrfGuard = (req: Request, _res: Response, next: NextFunction): voi
 
   const origin = req.get('origin');
   if (origin) {
-    if (originAllowed(origin)) return next();
+    if (originAllowed(origin, req)) return next();
     throw new AppError(403, 'Cross-site request rejected', undefined, 'CSRF_ORIGIN_MISMATCH');
   }
 
   const referer = req.get('referer');
   if (referer) {
     try {
-      if (originAllowed(new URL(referer).origin)) return next();
+      if (originAllowed(new URL(referer).origin, req)) return next();
     } catch {
       // A malformed Referer is treated as absent and falls through to rejection.
     }

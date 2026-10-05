@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
-import { Badge, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner } from '../components/ui.jsx';
+import { Badge, Button, EmptyState, ErrorAlert, Field, Modal, PageHeader, Spinner } from '../components/ui.jsx';
+import { AttachedFile, FileAttachmentField } from '../components/FileAttachment.jsx';
 import { useToast } from '../components/toast.jsx';
 
 const emptyForm = { title: '', description: '', courseId: '', maxMarks: 10, dueAt: '' };
@@ -153,6 +154,7 @@ export function StudentAssignmentsPage() {
   const [error, setError] = useState(null);
   const [activeAssignment, setActiveAssignment] = useState(null);
   const [submitText, setSubmitText] = useState('');
+  const [fileUrl, setFileUrl] = useState(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -164,6 +166,10 @@ export function StudentAssignmentsPage() {
       const { data } = await api.get(`/assignments/${a.id}`);
       setActiveAssignment(data.data.assignment);
       setSubmitText(data.data.assignment.mySubmission?.answerText ?? '');
+      // Start the picker empty even on a resubmit: the previous file is shown
+      // separately, and carrying its URL into the field would imply the student
+      // had re-attached something they have not.
+      setFileUrl(null);
     } catch (err) {
       setError(err);
     }
@@ -174,10 +180,14 @@ export function StudentAssignmentsPage() {
     setBusy(true);
     try {
       await api.post(`/assignments/${activeAssignment.id}/submit`, {
-        answerText: submitText || undefined,
+        answerText: submitText.trim() || undefined,
+        // Resubmitting without picking a new file keeps the one already stored,
+        // so the student does not have to re-upload to fix a typo in the text.
+        fileUrl: fileUrl ?? activeAssignment.mySubmission?.fileUrl ?? undefined,
       });
       toast.success('Assignment submitted');
       setActiveAssignment(null);
+      setFileUrl(null);
       await load();
     } catch (err) {
       toast.error(err?.response?.data?.message ?? 'Failed to submit');
@@ -188,6 +198,12 @@ export function StudentAssignmentsPage() {
 
   if (error) return <ErrorAlert error={error} />;
   if (!items) return <Spinner />;
+
+  // The server rejects a submission carrying neither, so the button mirrors that
+  // rather than letting the student discover it as a 400.
+  const canSubmit =
+    !busy &&
+    Boolean(submitText.trim() || fileUrl || activeAssignment?.mySubmission?.fileUrl);
 
   return (
     <div>
@@ -252,11 +268,23 @@ export function StudentAssignmentsPage() {
                 {activeAssignment.mySubmission.feedback && (
                   <p className="mt-1 text-xs">Feedback: {activeAssignment.mySubmission.feedback}</p>
                 )}
+                {activeAssignment.mySubmission.fileUrl && (
+                  <AttachedFile
+                    className="mt-3"
+                    url={activeAssignment.mySubmission.fileUrl}
+                    name={`${activeAssignment.title} — submitted file`}
+                  />
+                )}
               </div>
             )}
 
-            <Field label="Your answer">
+            <Field
+              label="Your answer"
+              hint="Optional if you attach a file."
+              htmlFor="assignment-answer"
+            >
               <textarea
+                id="assignment-answer"
                 className="input min-h-[150px]"
                 placeholder="Type your answer here…"
                 value={submitText}
@@ -264,11 +292,22 @@ export function StudentAssignmentsPage() {
               />
             </Field>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setActiveAssignment(null)} className="btn-secondary">Cancel</button>
-              <button onClick={submit} disabled={busy || !submitText.trim()} className="btn-primary">
-                {busy ? 'Submitting…' : 'Submit'}
-              </button>
+            <Field label="Attach a file" hint="Optional if you have written an answer above.">
+              <FileAttachmentField value={fileUrl} onChange={setFileUrl} disabled={busy} />
+            </Field>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+              {!canSubmit && (
+                <p className="mr-auto text-xs text-ink-subtle">
+                  Write an answer or attach a file to submit.
+                </p>
+              )}
+              <Button variant="secondary" onClick={() => setActiveAssignment(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={submit} disabled={!canSubmit} loading={busy}>
+                {activeAssignment.mySubmission ? 'Resubmit' : 'Submit'}
+              </Button>
             </div>
           </div>
         )}

@@ -41,11 +41,11 @@ export function ForgotPasswordPage() {
   if (sentTo) {
     return (
       <div>
-        <span className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-md border border-positive/30 bg-positive-soft text-positive-ink">
-          <MailCheck className="h-4 w-4" aria-hidden="true" />
+        <span className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-positive-soft text-positive-ink ring-1 ring-inset ring-positive/25">
+          <MailCheck className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
         </span>
         <h1 className="text-display text-ink">Check your inbox</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
+        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
           If an account exists for <span className="font-medium text-ink">{sentTo}</span>, a reset
           link is on its way. The link is valid for one hour and can be used once.
         </p>
@@ -69,7 +69,7 @@ export function ForgotPasswordPage() {
   return (
     <div>
       <h1 className="text-display text-ink">Reset your password</h1>
-      <p className="mt-1.5 text-sm text-ink-muted">
+      <p className="mt-2 text-sm leading-relaxed text-ink-muted">
         Enter the email on your account and we will send a one-time reset link.
       </p>
 
