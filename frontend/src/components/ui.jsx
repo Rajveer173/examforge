@@ -19,6 +19,33 @@ import {
 import { useEscapeKey, useFocusTrap, useScrollLock } from '../lib/hooks.js';
 import { initials as toInitials } from '../lib/format.js';
 
+/*
+ * ============================================================================
+ * Shared primitives — "Aperture"
+ * ============================================================================
+ *
+ * Everything here is placed on the layer scale defined in index.css, and each
+ * element's radius, border, blur and shadow follow from its layer rather than
+ * being picked per component:
+ *
+ *   L1  cards, panels, toolbars, tables .. bg-surface        shadow-card
+ *   L2  hover / popover .................. bg-surface-raised shadow-raised
+ *   L4  modals, drawers .................. bg-surface-raised shadow-overlay
+ *
+ * Two consequences worth stating, because they are what stops the redesign
+ * from drifting back into the old flat-rules look:
+ *
+ *   1. Separation is drawn with elevation and soft fills. Hairlines survive
+ *      only where they carry information (a table row boundary, a panel
+ *      header/body split) — never as decoration around a box.
+ *   2. Colour is a signal, not a skin. A tone tints a bloom, a chip or a ring;
+ *      it does not recolour body copy or a figure.
+ *
+ * Accent bloom (shadow-glow, and the blurred discs below) is rationed: the
+ * primary action, the active dock item, and the accent stat tile. If more than
+ * one thing on a screen bloms, none of them read as primary.
+ */
+
 export function cx(...parts) {
   return parts.filter(Boolean).join(' ');
 }
@@ -28,17 +55,19 @@ export function cx(...parts) {
 function Breadcrumbs({ items }) {
   if (!items?.length) return null;
   return (
-    <nav aria-label="Breadcrumb" className="mb-2">
-      <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-subtle">
+    <nav aria-label="Breadcrumb" className="mb-3">
+      <ol className="flex flex-wrap items-center gap-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.07em] text-ink-subtle">
         {items.map((crumb, index) => {
           const last = index === items.length - 1;
           return (
-            <li key={`${crumb.label}-${index}`} className="flex items-center gap-1">
+            <li key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
               {index > 0 && (
-                <ChevronRight className="h-3 w-3 shrink-0 text-ink-subtle" aria-hidden="true" />
+                <span className="shrink-0 text-line-strong" aria-hidden="true">
+                  /
+                </span>
               )}
               {crumb.to && !last ? (
-                <Link to={crumb.to} className="rounded-sm hover:text-ink hover:underline">
+                <Link to={crumb.to} className="rounded-sm transition-colors hover:text-accent">
                   {crumb.label}
                 </Link>
               ) : (
@@ -54,28 +83,49 @@ function Breadcrumbs({ items }) {
   );
 }
 
+/**
+ * The masthead of every page. The title is the only thing on a page set in the
+ * display family — that is what marks a page apart from a section.
+ *
+ * The rule underneath fades out to the right instead of running edge to edge:
+ * a full-width 1px line is exactly the device this system replaced, and a
+ * fading one reads as the end of the header rather than as a table border.
+ */
 export function PageHeader({ title, description, actions, eyebrow, breadcrumbs }) {
   return (
-    <header className="mb-6 border-b border-line pb-4">
+    <header className="relative mb-8 pb-6">
       <Breadcrumbs items={breadcrumbs} />
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
         <div className="min-w-0">
-          {eyebrow && <p className="eyebrow mb-1.5">{eyebrow}</p>}
+          {eyebrow && (
+            <p className="eyebrow mb-3 flex items-center gap-2.5">
+              <span aria-hidden="true" className="h-px w-6 shrink-0 rounded-full bg-accent" />
+              <span className="truncate">{eyebrow}</span>
+            </p>
+          )}
           <h1 className="text-display text-ink">{title}</h1>
-          {description && <p className="mt-1.5 max-w-2xl text-sm text-ink-muted">{description}</p>}
+          {description && (
+            <p className="mt-3 max-w-prose text-[0.9375rem] leading-relaxed text-ink-muted">
+              {description}
+            </p>
+          )}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-line-strong via-line to-transparent"
+      />
     </header>
   );
 }
 
 export function SectionHeader({ title, description, action }) {
   return (
-    <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-1.5">
       <div className="min-w-0">
-        <h2 className="text-[0.9375rem] font-semibold tracking-[-0.006em] text-ink">{title}</h2>
-        {description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}
+        <h2 className="text-title text-ink">{title}</h2>
+        {description && <p className="mt-1 text-sm text-ink-muted">{description}</p>}
       </div>
       {action}
     </div>
@@ -86,9 +136,9 @@ export function SectionHeader({ title, description, action }) {
 
 const PANEL_PADDING = {
   none: 'p-0',
-  sm: 'p-3',
-  md: 'p-4',
-  lg: 'p-6',
+  sm: 'p-4',
+  md: 'p-6',
+  lg: 'p-8',
 };
 
 export function Panel({
@@ -104,19 +154,22 @@ export function Panel({
   return (
     <section className={cx('card flex flex-col', className)}>
       {(title || action || description) && (
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-line px-6 py-4">
           <div className="min-w-0">
-            {title && <h2 className="text-[0.875rem] font-semibold text-ink">{title}</h2>}
-            {description && <p className="mt-0.5 text-[0.8125rem] text-ink-muted">{description}</p>}
+            {title && <h2 className="text-title text-ink">{title}</h2>}
+            {description && <p className="mt-1 text-[0.8125rem] text-ink-muted">{description}</p>}
           </div>
           {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
         </div>
       )}
-      <div className={cx('flex-1 min-w-0', bodyClassName ?? PANEL_PADDING[padding] ?? PANEL_PADDING.md)}>
+      {/* bodyClassName composes with the padding rather than replacing it: every
+          call site that passes one is passing layout (a flex row), not a padding
+          reset, and losing the padding flushed that content to the card edge. */}
+      <div className={cx('min-w-0 flex-1', PANEL_PADDING[padding] ?? PANEL_PADDING.md, bodyClassName)}>
         {children}
       </div>
       {footer && (
-        <div className="border-t border-line bg-surface-sunken/60 px-4 py-2.5 text-[0.8125rem] text-ink-muted">
+        <div className="rounded-b-2xl border-t border-line bg-surface-sunken px-6 py-4 text-[0.8125rem] text-ink-muted">
           {footer}
         </div>
       )}
@@ -124,12 +177,16 @@ export function Panel({
   );
 }
 
-/** Filter / search row that sits directly above a table or grid. */
+/**
+ * Filter / search row that sits directly above a table or grid. It is a full L1
+ * surface of its own — the same card treatment as the data below it, so the two
+ * read as a pair of stacked objects rather than as a strip glued to a box.
+ */
 export function Toolbar({ children, className }) {
   return (
     <div
       className={cx(
-        'mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2.5 shadow-card',
+        'mb-4 flex flex-wrap items-center gap-2.5 rounded-2xl border border-line bg-surface px-4 py-3 shadow-card',
         className,
       )}
     >
@@ -140,38 +197,80 @@ export function Toolbar({ children, className }) {
 
 /* --------------------------------------------------------------- stat tile */
 
+/**
+ * Tone on a stat tile is carried by light — a blurred disc bleeding out of the
+ * top-right corner, plus the icon chip — and never by the figure itself. A red
+ * number reads as an error, and most of these numbers are not errors.
+ */
 const STAT_TONES = {
-  neutral: 'text-ink',
-  accent: 'text-accent',
-  positive: 'text-positive',
-  caution: 'text-caution',
-  critical: 'text-critical',
-  info: 'text-info',
+  neutral: { bloom: 'bg-ink-subtle/20', chip: 'bg-surface-sunken text-ink-subtle ring-line', ring: null },
+  accent: { bloom: 'bg-accent/35', chip: 'bg-accent-soft text-accent-ink ring-accent/25', ring: 'ring-1 ring-accent/20' },
+  positive: { bloom: 'bg-positive/25', chip: 'bg-positive-soft text-positive-ink ring-positive/25', ring: null },
+  caution: { bloom: 'bg-caution/25', chip: 'bg-caution-soft text-caution-ink ring-caution/25', ring: null },
+  critical: { bloom: 'bg-critical/25', chip: 'bg-critical-soft text-critical-ink ring-critical/25', ring: null },
+  info: { bloom: 'bg-info/25', chip: 'bg-info-soft text-info-ink ring-info/25', ring: null },
 };
 
 const TREND_ICON = { up: TrendingUp, down: TrendingDown, flat: Minus };
-const TREND_TONE = { up: 'text-positive', down: 'text-critical', flat: 'text-ink-subtle' };
+const TREND_TONE = {
+  up: 'bg-positive-soft text-positive-ink ring-positive/20',
+  down: 'bg-critical-soft text-critical-ink ring-critical/20',
+  flat: 'bg-surface-sunken text-ink-subtle ring-line',
+};
 
 export function StatTile({ label, value, hint, tone = 'neutral', icon: Icon, trend }) {
+  const spec = STAT_TONES[resolveTone(tone)] ?? STAT_TONES.neutral;
   const TrendIcon = trend ? TREND_ICON[trend.direction] ?? Minus : null;
+
   return (
-    <div className="card px-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="eyebrow truncate">{label}</p>
-        {Icon && <Icon className="h-4 w-4 shrink-0 text-ink-subtle" aria-hidden="true" />}
+    <div
+      className={cx(
+        'card group relative overflow-hidden p-5 transition-shadow duration-200 hover:shadow-raised',
+        spec.ring,
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cx(
+          'pointer-events-none absolute -right-10 -top-14 h-36 w-36 rounded-full opacity-70 blur-2xl transition-opacity duration-300 group-hover:opacity-100',
+          spec.bloom,
+        )}
+      />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <p className="eyebrow min-w-0 flex-1 truncate pt-1.5">{label}</p>
+        {Icon && (
+          <span
+            className={cx(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset',
+              spec.chip,
+            )}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </span>
+        )}
       </div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <p className={cx('tabular text-[1.625rem] font-semibold leading-none tracking-tight', STAT_TONES[tone] ?? STAT_TONES.neutral)}>
-          {value}
-        </p>
+
+      <div className="relative mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+        <p className="tabular text-stat text-ink">{value}</p>
         {trend && (
-          <span className={cx('tabular inline-flex items-center gap-0.5 text-xs font-medium', TREND_TONE[trend.direction] ?? TREND_TONE.flat)}>
-            <TrendIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          <span
+            className={cx(
+              'tabular inline-flex items-center gap-1 rounded-full px-2 py-1 font-mono text-[0.6875rem] font-semibold leading-none ring-1 ring-inset',
+              TREND_TONE[trend.direction] ?? TREND_TONE.flat,
+            )}
+          >
+            <TrendIcon className="h-3 w-3" aria-hidden="true" />
             {trend.value}
           </span>
         )}
       </div>
-      {hint && <p className="mt-1.5 truncate text-xs text-ink-subtle">{hint}</p>}
+
+      {hint && (
+        <p className="relative mt-4 truncate border-t border-line pt-3 text-xs text-ink-subtle">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -184,6 +283,17 @@ const MODAL_WIDTHS = {
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
 };
+
+/* L4 scrim. The blur is what puts the dialog on its own layer: a flat wash
+   dims the page, a blur removes it from the plane the dialog sits on.
+   Positioning is left to the caller — the modal's scroll container needs a
+   fixed scrim so it does not scroll away with a tall dialog. */
+const SCRIM = 'animate-fade-in inset-0 bg-[rgb(var(--shadow))]/50 backdrop-blur-md';
+
+/** Circular icon button used for the close affordance on both overlays. */
+const OVERLAY_CLOSE =
+  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors ' +
+  'hover:bg-surface-sunken hover:text-ink focus-visible:ring-4 focus-visible:ring-accent/20';
 
 export function Modal({ open, onClose, title, description, children, footer, width = 'md' }) {
   const panelRef = useRef(null);
@@ -198,11 +308,7 @@ export function Modal({ open, onClose, title, description, children, footer, wid
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-6">
-      <div
-        className="animate-fade-in fixed inset-0 bg-[rgb(var(--shadow))]/50"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className={cx('fixed', SCRIM)} onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
@@ -211,33 +317,28 @@ export function Modal({ open, onClose, title, description, children, footer, wid
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cx(
-          'animate-fade-up relative my-auto w-full rounded-xl border border-line bg-surface-raised shadow-overlay',
+          'animate-scale-in relative my-auto w-full overflow-hidden rounded-3xl border border-line bg-surface-raised shadow-overlay',
           MODAL_WIDTHS[width] ?? width,
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
           <div className="min-w-0">
             <h2 id={titleId} className="text-title text-ink">
               {title}
             </h2>
             {description && (
-              <p id={descriptionId} className="mt-1 text-sm text-ink-muted">
+              <p id={descriptionId} className="mt-1.5 text-sm leading-relaxed text-ink-muted">
                 {description}
               </p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-sm -mr-1 -mt-0.5 px-1.5 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
-            aria-label="Close dialog"
-          >
+          <button type="button" onClick={onClose} className={cx(OVERLAY_CLOSE, '-mr-2 -mt-1')} aria-label="Close dialog">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <div className="scrollbar-slim max-h-[70vh] overflow-y-auto p-4">{children}</div>
+        <div className="scrollbar-slim max-h-[70vh] overflow-y-auto p-6">{children}</div>
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface-sunken px-6 py-4">
             {footer}
           </div>
         )}
@@ -277,9 +378,12 @@ export function ConfirmDialog({
         </>
       }
     >
-      <p className="text-sm text-ink-muted">{description}</p>
+      <p className="text-sm leading-relaxed text-ink-muted">{description}</p>
       {tone === 'danger' && (
-        <p className="mt-2 text-sm font-medium text-critical-ink">This cannot be undone.</p>
+        <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-critical-soft px-3 py-1.5 text-[0.8125rem] font-semibold text-critical-ink ring-1 ring-inset ring-critical/20">
+          <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+          This cannot be undone.
+        </p>
       )}
     </Modal>
   );
@@ -304,11 +408,7 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div
-        className="animate-fade-in absolute inset-0 bg-[rgb(var(--shadow))]/50"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className={cx('absolute', SCRIM)} onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
@@ -316,29 +416,31 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
         aria-labelledby={title ? titleId : undefined}
         tabIndex={-1}
         className={cx(
-          'animate-slide-left relative flex h-full w-full flex-col border-l border-line bg-surface shadow-overlay',
+          // Above sm the drawer is inset from the viewport and fully rounded, so
+          // it reads as a slab floating over the page rather than as a second
+          // window welded to the edge of the screen. On phones it stays flush,
+          // where every pixel of width is worth more than the effect.
+          'animate-slide-left relative flex h-full w-full flex-col overflow-hidden border border-line bg-surface-raised shadow-overlay',
+          'sm:my-3 sm:mr-3 sm:h-[calc(100%-1.5rem)] sm:rounded-3xl',
           DRAWER_WIDTHS[width] ?? width,
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
           <div className="min-w-0">
             <h2 id={titleId} className="text-title text-ink">
               {title}
             </h2>
-            {description && <p className="mt-1 text-sm text-ink-muted">{description}</p>}
+            {description && <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">{description}</p>}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-sm -mr-1 -mt-0.5 px-1.5 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
-            aria-label="Close panel"
-          >
+          <button type="button" onClick={onClose} className={cx(OVERLAY_CLOSE, '-mr-2 -mt-1')} aria-label="Close panel">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <div className="scrollbar-slim flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="scrollbar-slim flex-1 overflow-y-auto p-6">{children}</div>
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>
+          <div className="flex items-center justify-end gap-2 border-t border-line bg-surface-sunken px-6 py-4">
+            {footer}
+          </div>
         )}
       </div>
     </div>,
@@ -350,9 +452,17 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
 
 export function Spinner({ label = 'Loading…', className }) {
   return (
-    <div className={cx('flex flex-col items-center justify-center py-12 text-ink-subtle', className)} role="status">
-      <LoaderCircle className="h-5 w-5 animate-spin text-accent" aria-hidden="true" />
-      {label && <p className="mt-2.5 text-sm">{label}</p>}
+    <div
+      className={cx('flex flex-col items-center justify-center py-16 text-ink-subtle', className)}
+      role="status"
+    >
+      <span className="relative flex h-10 w-10 items-center justify-center">
+        {/* The bloom behind the spinner keeps a lone 20px glyph from looking
+            lost in the middle of an otherwise empty card. */}
+        <span aria-hidden="true" className="absolute inset-0 rounded-full bg-accent/15 blur-lg" />
+        <LoaderCircle className="relative h-6 w-6 animate-spin text-accent" aria-hidden="true" />
+      </span>
+      {label && <p className="eyebrow mt-4">{label}</p>}
     </div>
   );
 }
@@ -361,16 +471,21 @@ export function Spinner({ label = 'Loading…', className }) {
 export function Skeleton({ className }) {
   return (
     <div
-      className={cx('shimmer rounded-md bg-surface-sunken', className ?? 'h-4 w-full')}
+      className={cx('shimmer rounded-lg bg-surface-sunken', className ?? 'h-4 w-full')}
       aria-hidden="true"
     />
   );
 }
 
 export function SkeletonTable({ rows = 5, cols = 4 }) {
+  // Shares Table's shell so the page does not resize when the data lands.
   return (
-    <div className="table-shell" role="status" aria-label="Loading table">
-      <table className="table-base">
+    <div
+      className="table-shell scrollbar-slim overflow-hidden rounded-2xl border border-line bg-surface shadow-card"
+      role="status"
+      aria-label="Loading table"
+    >
+      <table className={cx('table-base', TABLE_GUTTERS)}>
         <thead>
           <tr>
             {Array.from({ length: cols }, (_, i) => (
@@ -398,13 +513,21 @@ export function SkeletonTable({ rows = 5, cols = 4 }) {
 
 export function EmptyState({ title, description, action, icon: Icon = Inbox }) {
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong bg-surface px-6 py-12 text-center">
-      <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface-sunken text-ink-subtle">
-        <Icon className="h-4 w-4" aria-hidden="true" />
+    <div className="animate-fade-up relative flex flex-col items-center overflow-hidden rounded-2xl border border-dashed border-line-strong bg-surface-sunken/60 px-6 py-16 text-center">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-accent/10 blur-2xl"
+      />
+      {/* The icon sits on a real L1 tile: an empty state is still a place, and
+          giving it one lifted object stops it reading as a broken region. */}
+      <span className="relative mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-surface text-accent shadow-card">
+        <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
-      {description && <p className="mt-1 max-w-sm text-sm text-ink-muted">{description}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      <h3 className="relative text-title text-ink">{title}</h3>
+      {description && (
+        <p className="relative mt-2 max-w-sm text-sm leading-relaxed text-ink-muted">{description}</p>
+      )}
+      {action && <div className="relative mt-6">{action}</div>}
     </div>
   );
 }
@@ -440,17 +563,22 @@ export function ErrorAlert({ error, className, onRetry }) {
     <div
       role="alert"
       className={cx(
-        'flex flex-wrap items-start gap-x-3 gap-y-2 rounded-md border border-critical/30 bg-critical-soft px-3 py-2.5 text-sm text-critical-ink',
+        'flex flex-wrap items-start gap-x-3 gap-y-2.5 rounded-2xl bg-critical-soft px-4 py-3.5 text-sm text-critical-ink shadow-card ring-1 ring-inset ring-critical/20',
         className,
       )}
     >
-      <CircleAlert className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1">{errorMessage(error)}</span>
+      <span
+        aria-hidden="true"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-critical/15"
+      >
+        <CircleAlert className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0 flex-1 pt-0.5 leading-relaxed">{errorMessage(error)}</span>
       {onRetry && (
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex items-center gap-1 rounded-sm font-medium underline underline-offset-2 hover:no-underline"
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.8125rem] font-semibold ring-1 ring-inset ring-critical/25 transition-colors hover:bg-critical/10"
         >
           <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
           Retry
@@ -464,12 +592,37 @@ export function ErrorAlert({ error, className, onRetry }) {
 
 const BADGE_TONES = {
   neutral: 'bg-surface-sunken text-ink-muted ring-line-strong',
-  accent: 'bg-accent-soft text-accent-ink ring-accent/30',
-  positive: 'bg-positive-soft text-positive-ink ring-positive/30',
-  caution: 'bg-caution-soft text-caution-ink ring-caution/30',
-  critical: 'bg-critical-soft text-critical-ink ring-critical/30',
-  info: 'bg-info-soft text-info-ink ring-info/30',
+  accent: 'bg-accent-soft text-accent-ink ring-accent/25',
+  positive: 'bg-positive-soft text-positive-ink ring-positive/25',
+  caution: 'bg-caution-soft text-caution-ink ring-caution/25',
+  critical: 'bg-critical-soft text-critical-ink ring-critical/25',
+  info: 'bg-info-soft text-info-ink ring-info/25',
 };
+
+/**
+ * Earlier pages were written against a raw-colour vocabulary (green, red,
+ * amber, blue, slate, brand, violet) that the semantic palette replaced. Those
+ * call sites fell through to `neutral`, which is why every status chip in the
+ * app rendered grey. Rather than a rename across forty files, the old names are
+ * kept as aliases onto the semantic tone they always meant.
+ */
+const TONE_ALIASES = {
+  green: 'positive',
+  red: 'critical',
+  amber: 'caution',
+  orange: 'caution',
+  blue: 'info',
+  violet: 'accent',
+  brand: 'accent',
+  primary: 'accent',
+  danger: 'critical',
+  slate: 'neutral',
+  gray: 'neutral',
+  grey: 'neutral',
+};
+
+/** Normalise any tone name — semantic or legacy — onto the semantic palette. */
+export const resolveTone = (tone) => TONE_ALIASES[tone] ?? tone ?? 'neutral';
 
 const BADGE_DOTS = {
   neutral: 'bg-ink-subtle',
@@ -480,18 +633,24 @@ const BADGE_DOTS = {
   info: 'bg-info',
 };
 
+/**
+ * A status chip is metadata, so it is set in the mono face and shaped as a pill
+ * — the same geometry as the buttons and the dock, which is what keeps the
+ * chrome of a row from looking like a different kit to the controls above it.
+ */
 export function Badge({ children, tone = 'neutral', dot = false, className }) {
+  const key = resolveTone(tone);
   return (
     <span
       className={cx(
-        'inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset',
-        BADGE_TONES[tone] ?? BADGE_TONES.neutral,
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[0.625rem] font-semibold uppercase leading-none tracking-[0.08em] ring-1 ring-inset',
+        BADGE_TONES[key] ?? BADGE_TONES.neutral,
         className,
       )}
     >
       {dot && (
         <span
-          className={cx('h-1.5 w-1.5 shrink-0 rounded-full', BADGE_DOTS[tone] ?? BADGE_DOTS.neutral)}
+          className={cx('h-1.5 w-1.5 shrink-0 rounded-full', BADGE_DOTS[key] ?? BADGE_DOTS.neutral)}
           aria-hidden="true"
         />
       )}
@@ -546,20 +705,25 @@ export function Field({ label, error, hint, htmlFor, required, children }) {
       )}
       {children}
       {error && (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs text-critical-ink">
-          {error}
+        <p id={errorId} role="alert" className="mt-2 flex items-start gap-1.5 text-xs font-medium text-critical-ink">
+          <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0">{error}</span>
         </p>
       )}
-      {!error && hint && <p className="mt-1.5 text-xs text-ink-subtle">{hint}</p>}
+      {!error && hint && <p className="mt-2 text-xs leading-5 text-ink-subtle">{hint}</p>}
     </div>
   );
 }
+
+/* The invalid look mirrors the focus ring on .input — same 4px spread, critical
+   hue — so an error state is the same shape of signal as a focus state. */
+const INVALID = 'border-critical focus:border-critical focus:ring-4 focus:ring-critical/20';
 
 export const Input = forwardRef(function Input({ className, invalid, ...props }, ref) {
   return (
     <input
       ref={ref}
-      className={cx('input', invalid && 'border-critical focus:border-critical focus:ring-critical/30', className)}
+      className={cx('input', invalid && INVALID, className)}
       aria-invalid={invalid || undefined}
       {...props}
     />
@@ -571,7 +735,7 @@ export const Textarea = forwardRef(function Textarea({ className, invalid, rows 
     <textarea
       ref={ref}
       rows={rows}
-      className={cx('input', invalid && 'border-critical focus:border-critical focus:ring-critical/30', className)}
+      className={cx('input', invalid && INVALID, className)}
       aria-invalid={invalid || undefined}
       {...props}
     />
@@ -582,7 +746,7 @@ export const Select = forwardRef(function Select({ className, invalid, children,
   return (
     <select
       ref={ref}
-      className={cx('input', invalid && 'border-critical focus:border-critical', className)}
+      className={cx('input', invalid && INVALID, className)}
       aria-invalid={invalid || undefined}
       {...props}
     >
@@ -603,29 +767,47 @@ export const Select = forwardRef(function Select({ className, invalid, children,
   );
 });
 
+/**
+ * The box is a real `appearance-none` checkbox rather than a styled sibling, so
+ * it keeps native semantics, form participation and `register()` support while
+ * taking the system's softer geometry. The tick is painted on top with pointer
+ * events off, which leaves the whole 20px square as the hit target.
+ */
 export const Checkbox = forwardRef(function Checkbox({ className, label, description, id, ...props }, ref) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const box = (
-    <input
-      ref={ref}
-      id={inputId}
-      type="checkbox"
-      className={cx(
-        'h-4 w-4 shrink-0 cursor-pointer rounded-sm border border-line-strong bg-surface text-accent',
-        'accent-[rgb(var(--accent))] focus-visible:ring-2 focus-visible:ring-accent',
-        className,
-      )}
-      {...props}
-    />
+    // className lands on the wrapper, not the input: every call site passes
+    // alignment (mt-0.5 next to a wrapped row of text), and margin on the
+    // absolutely-positioned input would move the box off its own hit area.
+    <span className={cx('relative inline-flex h-5 w-5 shrink-0 items-center justify-center', className)}>
+      <input
+        ref={ref}
+        id={inputId}
+        type="checkbox"
+        className={cx(
+          'peer absolute inset-0 m-0 h-5 w-5 cursor-pointer appearance-none rounded-[0.5rem] border border-line-strong bg-surface',
+          'transition-[background-color,border-color,box-shadow] duration-150',
+          'checked:border-accent checked:bg-accent hover:border-accent/60',
+          'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20',
+          'disabled:cursor-not-allowed disabled:opacity-45',
+        )}
+        {...props}
+      />
+      <Check
+        aria-hidden="true"
+        className="pointer-events-none relative h-3.5 w-3.5 scale-75 text-accent-on opacity-0 transition duration-150 peer-checked:scale-100 peer-checked:opacity-100"
+        strokeWidth={3}
+      />
+    </span>
   );
   if (!label) return box;
   return (
-    <div className="flex items-start gap-2">
-      <span className="mt-0.5">{box}</span>
-      <label htmlFor={inputId} className="min-w-0 cursor-pointer select-none">
-        <span className="block text-[0.8125rem] font-medium text-ink">{label}</span>
-        {description && <span className="mt-0.5 block text-xs text-ink-subtle">{description}</span>}
+    <div className="flex items-start gap-2.5">
+      {box}
+      <label htmlFor={inputId} className="min-w-0 cursor-pointer select-none pt-px">
+        <span className="block text-[0.8125rem] font-medium leading-5 text-ink">{label}</span>
+        {description && <span className="mt-0.5 block text-xs leading-5 text-ink-subtle">{description}</span>}
       </label>
     </div>
   );
@@ -633,7 +815,9 @@ export const Checkbox = forwardRef(function Checkbox({ className, label, descrip
 
 /**
  * Switch renders a real checkbox with role="switch" so it participates in forms
- * and in `register()` exactly like the other primitives.
+ * and in `register()` exactly like the other primitives. The track picks up the
+ * accent bloom when on: it is the one control whose state is worth announcing
+ * with light rather than only with colour.
  */
 export const Switch = forwardRef(function Switch(
   { className, label, description, checked, defaultChecked, id, disabled, ...props },
@@ -643,7 +827,7 @@ export const Switch = forwardRef(function Switch(
   const inputId = id ?? generatedId;
   return (
     <div className={cx('flex items-start gap-3', className)}>
-      <span className="relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center">
+      <span className="relative inline-flex h-6 w-11 shrink-0 items-center">
         <input
           ref={ref}
           id={inputId}
@@ -657,17 +841,17 @@ export const Switch = forwardRef(function Switch(
         />
         <span
           aria-hidden="true"
-          className="pointer-events-none h-5 w-9 rounded-full border border-line-strong bg-surface-sunken transition-colors peer-checked:border-accent peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-canvas peer-disabled:opacity-50"
+          className="pointer-events-none h-6 w-11 rounded-full border border-line-strong bg-surface-sunken transition-[background-color,border-color,box-shadow] duration-200 peer-checked:border-accent peer-checked:bg-accent peer-checked:shadow-glow peer-focus-visible:ring-4 peer-focus-visible:ring-accent/20 peer-disabled:opacity-50"
         />
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-0.5 h-4 w-4 rounded-full bg-surface shadow-card transition-transform peer-checked:translate-x-4"
+          className="pointer-events-none absolute left-[0.1875rem] h-[1.125rem] w-[1.125rem] rounded-full bg-surface shadow-card transition-transform duration-200 peer-checked:translate-x-5"
         />
       </span>
       {label && (
         <label htmlFor={inputId} className="min-w-0 cursor-pointer select-none">
-          <span className="block text-[0.8125rem] font-medium text-ink">{label}</span>
-          {description && <span className="mt-0.5 block text-xs text-ink-subtle">{description}</span>}
+          <span className="block text-[0.8125rem] font-medium leading-6 text-ink">{label}</span>
+          {description && <span className="mt-0.5 block text-xs leading-5 text-ink-subtle">{description}</span>}
         </label>
       )}
     </div>
@@ -682,7 +866,7 @@ export const SearchInput = forwardRef(function SearchInput(
   return (
     <div className={cx('relative min-w-0', className)}>
       <Search
-        className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle"
+        className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle"
         aria-hidden="true"
       />
       <input
@@ -690,14 +874,14 @@ export const SearchInput = forwardRef(function SearchInput(
         type="search"
         value={value}
         placeholder={placeholder}
-        className={cx('input pl-8', showClear && 'pr-8')}
+        className={cx('input pl-10', showClear && 'pr-10')}
         {...props}
       />
       {showClear && (
         <button
           type="button"
           onClick={onClear}
-          className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-sm text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+          className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-ink-subtle transition-colors hover:bg-surface-sunken hover:text-ink"
           aria-label="Clear search"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -739,6 +923,8 @@ export const Button = forwardRef(function Button(
   const classes = cx(
     BUTTON_VARIANTS[variant] ?? BUTTON_VARIANTS.secondary,
     variant === 'link' ? null : BUTTON_SIZES[size] ?? BUTTON_SIZES.md,
+    // Icon-only buttons collapse to a circle — .btn is already fully rounded, so
+    // a square aspect ratio is all that is needed to get there.
     !children && 'px-0 aspect-square',
     className,
   );
@@ -779,10 +965,24 @@ export const Button = forwardRef(function Button(
 
 const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' };
 
+/*
+ * Vertical cell padding comes from --cell-y/--cell-x so the density toggle keeps
+ * working; what is added here is horizontal air at the card edge, which the
+ * density setting has no reason to take away. Without it the first column is
+ * jammed against a 28px corner radius.
+ */
+const TABLE_GUTTERS =
+  '[&_thead_th:first-child]:pl-6 [&_tbody_td:first-child]:pl-6 [&_thead_th:last-child]:pr-6 [&_tbody_td:last-child]:pr-6';
+
 export function Table({ head, children, className, dense = false }) {
   return (
-    <div className={cx('table-shell scrollbar-slim rounded-lg border border-line bg-surface', className)}>
-      <table className={cx('table-base', dense && '[&_tbody_td]:py-1.5')}>
+    <div
+      className={cx(
+        'table-shell scrollbar-slim overflow-hidden rounded-2xl border border-line bg-surface shadow-card',
+        className,
+      )}
+    >
+      <table className={cx('table-base', TABLE_GUTTERS, dense && '[&_tbody_td]:py-1.5')}>
         {head && (
           <thead>
             <tr>
@@ -883,6 +1083,8 @@ export function DataTable({
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
+/* Pagination sits directly under a table card. It gets no rule of its own —
+   the card edge above it is already the separation. */
 export function Pagination({ page, pageCount, total, pageSize, onPageChange, onPageSizeChange }) {
   const pages = Math.max(1, pageCount ?? 1);
   const current = Math.min(Math.max(1, page ?? 1), pages);
@@ -900,11 +1102,8 @@ export function Pagination({ page, pageCount, total, pageSize, onPageChange, onP
   }, [pages, current]);
 
   return (
-    <nav
-      className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-1 pt-3"
-      aria-label="Pagination"
-    >
-      <p className="tabular text-xs text-ink-subtle">
+    <nav className="flex flex-wrap items-center justify-between gap-3 px-1 pt-4" aria-label="Pagination">
+      <p className="tabular font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-ink-subtle">
         {total === undefined
           ? `Page ${current} of ${pages}`
           : `Showing ${from}–${to} of ${total}`}
@@ -912,10 +1111,10 @@ export function Pagination({ page, pageCount, total, pageSize, onPageChange, onP
 
       <div className="flex items-center gap-2">
         {onPageSizeChange && (
-          <label className="flex items-center gap-1.5 text-xs text-ink-subtle">
+          <label className="flex items-center gap-2 text-xs text-ink-subtle">
             <span>Rows</span>
             <select
-              className="input h-7 w-auto py-0 pl-2 pr-6 text-xs"
+              className="input h-8 w-auto py-0 pl-3 pr-7 text-xs"
               value={pageSize}
               onChange={(event) => onPageSizeChange(Number(event.target.value))}
               aria-label="Rows per page"
@@ -929,10 +1128,12 @@ export function Pagination({ page, pageCount, total, pageSize, onPageChange, onP
           </label>
         )}
 
-        <div className="flex items-center gap-0.5">
+        {/* One pill rail: the page numbers sit in a sunken track so the set
+            reads as a single control rather than as loose buttons. */}
+        <div className="flex items-center gap-0.5 rounded-full border border-line bg-surface p-1 shadow-card">
           <button
             type="button"
-            className="btn btn-sm px-1.5 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:opacity-40"
+            className="btn btn-sm h-7 w-7 px-0 text-ink-muted hover:bg-accent-soft hover:text-accent-ink disabled:opacity-40"
             onClick={() => onPageChange(current - 1)}
             disabled={current <= 1}
             aria-label="Previous page"
@@ -952,10 +1153,10 @@ export function Pagination({ page, pageCount, total, pageSize, onPageChange, onP
                 onClick={() => onPageChange(item)}
                 aria-current={item === current ? 'page' : undefined}
                 className={cx(
-                  'tabular btn btn-sm min-w-[1.75rem] px-1.5',
+                  'tabular btn btn-sm h-7 min-w-[1.75rem] px-2 font-mono text-[0.75rem]',
                   item === current
-                    ? 'border-line-strong bg-surface-sunken font-semibold text-ink'
-                    : 'text-ink-muted hover:bg-surface-sunken hover:text-ink',
+                    ? 'bg-accent-soft text-accent-ink ring-1 ring-inset ring-accent/25'
+                    : 'text-ink-muted hover:bg-accent-soft/60 hover:text-accent-ink',
                 )}
               >
                 {item}
@@ -965,7 +1166,7 @@ export function Pagination({ page, pageCount, total, pageSize, onPageChange, onP
 
           <button
             type="button"
-            className="btn btn-sm px-1.5 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:opacity-40"
+            className="btn btn-sm h-7 w-7 px-0 text-ink-muted hover:bg-accent-soft hover:text-accent-ink disabled:opacity-40"
             onClick={() => onPageChange(current + 1)}
             disabled={current >= pages}
             aria-label="Next page"
@@ -1002,7 +1203,7 @@ export function Tabs({ tabs, value, onChange, className }) {
       ref={listRef}
       role="tablist"
       onKeyDown={onKeyDown}
-      className={cx('flex items-center gap-1 overflow-x-auto border-b border-line', className)}
+      className={cx('scrollbar-slim flex items-center gap-1 overflow-x-auto border-b border-line', className)}
     >
       {tabs.map((tab) => {
         const active = tab.value === value;
@@ -1015,22 +1216,28 @@ export function Tabs({ tabs, value, onChange, className }) {
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(tab.value)}
             className={cx(
-              '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[0.8125rem] font-medium transition-colors',
-              active
-                ? 'border-accent text-ink'
-                : 'border-transparent text-ink-muted hover:border-line-strong hover:text-ink',
+              'relative flex items-center gap-2 whitespace-nowrap rounded-t-xl px-3.5 py-3 text-[0.8125rem] font-semibold transition-colors',
+              active ? 'text-ink' : 'text-ink-muted hover:bg-accent-soft/40 hover:text-ink',
             )}
           >
             {tab.label}
             {tab.count !== undefined && (
               <span
                 className={cx(
-                  'tabular rounded-sm px-1 py-0.5 text-[0.6875rem] font-semibold',
+                  'tabular rounded-full px-2 py-0.5 font-mono text-[0.625rem] font-semibold leading-4',
                   active ? 'bg-accent-soft text-accent-ink' : 'bg-surface-sunken text-ink-subtle',
                 )}
               >
                 {tab.count}
               </span>
+            )}
+            {/* The underline is drawn on select rather than swapped in, so the
+                eye follows the mark to the tab it landed on. */}
+            {active && (
+              <span
+                aria-hidden="true"
+                className="animate-rule-in absolute -bottom-px left-2 right-2 h-0.5 origin-left rounded-full bg-accent"
+              />
             )}
           </button>
         );
@@ -1055,9 +1262,11 @@ export function ProgressBar({ value = 0, max = 100, tone = 'accent', label, clas
   return (
     <div className={cx('min-w-0', className)}>
       {label && (
-        <div className="mb-1 flex items-baseline justify-between gap-2 text-xs text-ink-muted">
-          <span className="truncate">{label}</span>
-          <span className="tabular shrink-0">{Math.round(pct)}%</span>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="truncate text-xs text-ink-muted">{label}</span>
+          <span className="tabular shrink-0 font-mono text-[0.6875rem] font-semibold text-ink">
+            {Math.round(pct)}%
+          </span>
         </div>
       )}
       <div
@@ -1066,10 +1275,15 @@ export function ProgressBar({ value = 0, max = 100, tone = 'accent', label, clas
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={label ?? 'Progress'}
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-sunken"
+        // A sunken track with an inset ring instead of a bordered box: the fill
+        // should look like it sits in a groove, not inside a rectangle.
+        className="h-2 w-full overflow-hidden rounded-full bg-surface-sunken ring-1 ring-inset ring-line"
       >
         <div
-          className={cx('h-full rounded-full transition-[width] duration-300', PROGRESS_TONES[tone] ?? PROGRESS_TONES.accent)}
+          className={cx(
+            'h-full rounded-full transition-[width] duration-500 ease-out',
+            PROGRESS_TONES[resolveTone(tone)] ?? PROGRESS_TONES.accent,
+          )}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -1080,11 +1294,11 @@ export function ProgressBar({ value = 0, max = 100, tone = 'accent', label, clas
 /* ------------------------------------------------------------------ avatar */
 
 const AVATAR_SIZES = {
-  xs: 'h-6 w-6 text-[0.625rem]',
-  sm: 'h-7 w-7 text-[0.6875rem]',
-  md: 'h-8 w-8 text-xs',
-  lg: 'h-10 w-10 text-sm',
-  xl: 'h-14 w-14 text-lg',
+  xs: 'h-6 w-6 text-[0.5625rem]',
+  sm: 'h-7 w-7 text-[0.625rem]',
+  md: 'h-8 w-8 text-[0.6875rem]',
+  lg: 'h-10 w-10 text-xs',
+  xl: 'h-14 w-14 text-base',
 };
 
 export function Avatar({ name, src, size = 'md', className }) {
@@ -1094,7 +1308,11 @@ export function Avatar({ name, src, size = 'md', className }) {
       <img
         src={src}
         alt={label}
-        className={cx('shrink-0 rounded-md border border-line object-cover', AVATAR_SIZES[size] ?? AVATAR_SIZES.md, className)}
+        className={cx(
+          'shrink-0 rounded-full object-cover ring-1 ring-inset ring-line-strong',
+          AVATAR_SIZES[size] ?? AVATAR_SIZES.md,
+          className,
+        )}
       />
     );
   }
@@ -1103,7 +1321,7 @@ export function Avatar({ name, src, size = 'md', className }) {
       aria-hidden="true"
       title={label}
       className={cx(
-        'flex shrink-0 select-none items-center justify-center rounded-md border border-accent/25 bg-accent-soft font-semibold text-accent-ink',
+        'flex shrink-0 select-none items-center justify-center rounded-full bg-accent-soft font-mono font-semibold uppercase tracking-[0.02em] text-accent-ink ring-1 ring-inset ring-accent/25',
         AVATAR_SIZES[size] ?? AVATAR_SIZES.md,
         className,
       )}
@@ -1116,10 +1334,10 @@ export function Avatar({ name, src, size = 'md', className }) {
 /* ----------------------------------------------------------------- tooltip */
 
 const TOOLTIP_SIDES = {
-  top: 'bottom-full left-1/2 -translate-x-1/2 mb-1.5',
-  bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5',
-  left: 'right-full top-1/2 -translate-y-1/2 mr-1.5',
-  right: 'left-full top-1/2 -translate-y-1/2 ml-1.5',
+  top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
+  bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+  left: 'right-full top-1/2 -translate-y-1/2 mr-2',
+  right: 'left-full top-1/2 -translate-y-1/2 ml-2',
 };
 
 /**
@@ -1148,7 +1366,10 @@ export function Tooltip({ label, children, side = 'top', className }) {
         role="tooltip"
         hidden={!open}
         className={cx(
-          'pointer-events-none absolute z-50 whitespace-nowrap rounded-sm border border-line bg-surface-raised px-2 py-1 text-xs text-ink shadow-overlay',
+          // Set on the always-dark slab rather than on surface: a tooltip that
+          // matches the page it floats over stops reading as a separate layer.
+          // It is the same dark tone the dock's own labels use.
+          'animate-fade-in pointer-events-none absolute z-50 whitespace-nowrap rounded-lg bg-panel px-2.5 py-1.5 text-xs font-medium text-panel-ink shadow-overlay ring-1 ring-inset ring-white/10',
           TOOLTIP_SIDES[side] ?? TOOLTIP_SIDES.top,
         )}
       >
@@ -1182,13 +1403,14 @@ export function CopyButton({ value, label = 'Copy', className }) {
       type="button"
       onClick={copy}
       className={cx(
-        'btn btn-sm gap-1 text-ink-muted hover:bg-surface-sunken hover:text-ink',
+        'btn btn-sm gap-1.5 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent-ink',
+        copied && 'bg-positive-soft text-positive-ink hover:bg-positive-soft hover:text-positive-ink',
         className,
       )}
       aria-label={copied ? 'Copied' : label}
     >
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
+        <Check className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <Copy className="h-3.5 w-3.5" aria-hidden="true" />
       )}
@@ -1196,4 +1418,3 @@ export function CopyButton({ value, label = 'Copy', className }) {
     </button>
   );
 }
-

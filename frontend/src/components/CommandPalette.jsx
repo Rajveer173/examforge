@@ -186,16 +186,22 @@ export function CommandPalette({ open, onClose }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 pt-[10vh]">
-      <div className="animate-fade-in absolute inset-0 bg-[rgb(var(--shadow))]/50" onClick={onClose} aria-hidden="true" />
+      {/* L4 scrim. The blur is what pushes the page a layer back rather than
+          just dimming it, which is how every other overlay in the system reads. */}
+      <div
+        className="animate-fade-in absolute inset-0 bg-[rgb(var(--shadow))]/50 backdrop-blur-[3px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="animate-fade-up relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-line bg-surface-raised shadow-overlay"
+        className="animate-fade-up relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-line bg-surface-raised shadow-overlay"
       >
-        <div className="flex items-center gap-2 border-b border-line px-3">
+        <div className="flex items-center gap-2.5 border-b border-line px-4">
           <Search className="h-4 w-4 shrink-0 text-ink-subtle" aria-hidden="true" />
           <input
             ref={inputRef}
@@ -211,19 +217,19 @@ export function CommandPalette({ open, onClose }) {
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Search pages, actions, tests, courses…"
-            className="h-12 w-full border-0 bg-transparent text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-0"
+            className="h-[3.25rem] w-full border-0 bg-transparent text-[0.9375rem] text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-0"
           />
           <button
             type="button"
             onClick={onClose}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:bg-accent-soft hover:text-accent-ink"
             aria-label="Close command palette"
           >
             <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
 
-        <div ref={listRef} className="scrollbar-slim max-h-[22rem] overflow-y-auto p-1.5">
+        <div ref={listRef} className="scrollbar-slim max-h-[22rem] overflow-y-auto p-2">
           {searching && items.length === 0 && (
             <div className="space-y-1.5 p-2">
               <Skeleton className="h-7 w-full" />
@@ -247,7 +253,7 @@ export function CommandPalette({ open, onClose }) {
               return (
                 <li key={item.id}>
                   {showGroup && (
-                    <p className="eyebrow px-2.5 pb-1 pt-3 first:pt-1">{item.group}</p>
+                    <p className="eyebrow px-3 pb-1.5 pt-3.5 first:pt-1">{item.group}</p>
                   )}
                   <div
                     id={`${listId}-${index}`}
@@ -257,7 +263,7 @@ export function CommandPalette({ open, onClose }) {
                     onMouseMove={() => setCursor(index)}
                     onClick={() => activate(item)}
                     className={cx(
-                      'flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm',
+                      'flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors',
                       active ? 'bg-accent-soft text-accent-ink' : 'text-ink-muted',
                     )}
                   >
@@ -267,7 +273,7 @@ export function CommandPalette({ open, onClose }) {
                       <ArrowRight className={cx('h-4 w-4 shrink-0', active ? 'text-accent' : 'text-ink-subtle')} aria-hidden="true" />
                     )}
                     <span className="min-w-0 flex-1 truncate">
-                      <span className={active ? 'font-medium' : undefined}>{item.label}</span>
+                      <span className={active ? 'font-semibold' : undefined}>{item.label}</span>
                       {item.hint && <span className="ml-2 text-xs text-ink-subtle">{item.hint}</span>}
                     </span>
                     {active && <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />}
@@ -278,7 +284,7 @@ export function CommandPalette({ open, onClose }) {
           </ul>
         </div>
 
-        <div className="flex items-center gap-4 border-t border-line bg-surface-sunken px-3 py-2 text-[0.6875rem] text-ink-subtle">
+        <div className="flex items-center gap-4 border-t border-line bg-surface-sunken px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-ink-subtle">
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>
@@ -301,7 +307,7 @@ export function CommandPalette({ open, onClose }) {
 
 function Kbd({ children }) {
   return (
-    <kbd className="rounded-sm border border-line-strong bg-surface px-1 py-px font-mono text-[0.625rem] text-ink-muted">
+    <kbd className="rounded-full border border-line-strong bg-surface px-1.5 py-px font-mono text-[0.625rem] normal-case text-ink-muted">
       {children}
     </kbd>
   );

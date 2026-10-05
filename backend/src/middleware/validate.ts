@@ -10,9 +10,14 @@ export const validate =
         query: req.query,
         params: req.params,
       });
-      req.body = result.body;
-      req.query = result.query as typeof req.query;
-      req.params = result.params as typeof req.params;
+      // Only write back what the schema actually declared. Zod strips keys it
+      // was not told about, so a body-only schema parses to `{ body }` — and
+      // assigning `result.params` unconditionally wiped req.params to undefined,
+      // breaking every route that pairs a body-only schema with a route param
+      // (assignment submit, grade, and anything else shaped that way).
+      if (result.body !== undefined) req.body = result.body;
+      if (result.query !== undefined) req.query = result.query as typeof req.query;
+      if (result.params !== undefined) req.params = result.params as typeof req.params;
       next();
     } catch (error) {
       if (error instanceof ZodError) {

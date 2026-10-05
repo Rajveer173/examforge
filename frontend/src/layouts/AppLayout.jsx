@@ -1,37 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell,
   ChevronDown,
-  ChevronRight,
   Command,
   LogOut,
-  Menu,
   Monitor,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   Rows3,
   Search,
   Settings,
   Sun,
+  Tags,
   User,
-  X,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { Brand } from '../components/Brand.jsx';
 import { CommandPalette, useCommandPalette } from '../components/CommandPalette.jsx';
+import { Dock } from '../components/Dock.jsx';
 import { Avatar, Badge, cx } from '../components/ui.jsx';
 import { navForRole, ROLE_LABEL } from '../config/navigation.js';
-import {
-  useClickOutside,
-  useEscapeKey,
-  useFocusTrap,
-  usePageVisible,
-  usePersistentState,
-  useScrollLock,
-} from '../lib/hooks.js';
+import { useClickOutside, useEscapeKey, usePageVisible, usePersistentState } from '../lib/hooks.js';
 import { useDensity, useTheme } from '../lib/theme.js';
 import { useAuthStore } from '../store/authStore.js';
+
+/**
+ * The application shell.
+ *
+ * There is no sidebar at any breakpoint. Chrome floats above a full-bleed
+ * canvas as two L3 glass islands — a slim context island at the top and the
+ * dock at the bottom — so every pixel of horizontal space belongs to the page.
+ * See `Dock.jsx` for how the sidebar's two levels survive the move.
+ */
 
 const POLL_INTERVAL_MS = 60_000;
 const CONTENT_ID = 'main-content';
@@ -65,117 +64,52 @@ function useUnreadCount() {
   return unreadCount;
 }
 
-function Brand({ compact = false }) {
+function SegmentedControl({ value, onChange, options, ariaLabel }) {
   return (
-    <Link to="/" className="flex items-center gap-2.5 rounded-md px-1 py-1" aria-label="ExamForge home">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent font-mono text-[0.75rem] font-semibold text-accent-on">
-        EF
-      </span>
-      {!compact && (
-        <span className="text-[0.9375rem] font-semibold tracking-[-0.012em] text-ink">ExamForge</span>
-      )}
-    </Link>
-  );
-}
-
-function NavItem({ item, rail, unreadCount }) {
-  const { to, label, icon: Icon, end, badge } = item;
-  const count = badge === 'notifications' ? unreadCount : 0;
-
-  return (
-    <NavLink
-      to={to}
-      end={end}
-      // In rail mode the label is the only thing identifying the icon, so it has
-      // to survive as an accessible name and as a hover hint.
-      title={rail ? label : undefined}
-      aria-label={rail ? (count > 0 ? `${label}, ${count} unread` : label) : undefined}
-      className={({ isActive }) =>
-        cx(
-          'group relative flex items-center gap-2.5 rounded-md py-1.5 text-[0.8125rem] font-medium transition-colors',
-          rail ? 'justify-center px-0' : 'px-2.5',
-          isActive
-            ? 'bg-accent-soft text-accent-ink'
-            : 'text-ink-muted hover:bg-surface-sunken hover:text-ink',
-        )
-      }
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="grid grid-cols-2 gap-0.5 rounded-full border border-line bg-surface-sunken p-0.5"
     >
-      {({ isActive }) => (
-        <>
-          <span
-            aria-hidden="true"
+      {options.map((option) => {
+        const Icon = option.icon;
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(option.value)}
             className={cx(
-              'absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent transition-opacity',
-              isActive ? 'opacity-100' : 'opacity-0',
+              'flex items-center justify-center gap-1.5 rounded-full px-2 py-1.5 font-mono text-[0.625rem] font-semibold uppercase tracking-[0.08em] transition-colors',
+              selected
+                ? 'bg-surface text-ink shadow-card'
+                : 'text-ink-subtle hover:text-ink-muted',
             )}
-          />
-          <Icon
-            className={cx(
-              'h-4 w-4 shrink-0',
-              isActive ? 'text-accent' : 'text-ink-subtle group-hover:text-ink-muted',
-            )}
-            aria-hidden="true"
-          />
-          {!rail && <span className="min-w-0 flex-1 truncate">{label}</span>}
-          {count > 0 &&
-            (rail ? (
-              <span
-                className="absolute right-1.5 top-1 h-1.5 w-1.5 rounded-full bg-critical"
-                aria-hidden="true"
-              />
-            ) : (
-              <Badge tone="critical">{count > 99 ? '99+' : count}</Badge>
-            ))}
-        </>
-      )}
-    </NavLink>
-  );
-}
-
-function NavGroup({ group, rail, collapsed, onToggle, unreadCount }) {
-  const contentId = `nav-group-${group.id}`;
-
-  if (rail) {
-    return (
-      <div className="space-y-0.5 border-b border-line pb-2 last:border-b-0" role="group" aria-label={group.label}>
-        {group.items.map((item) => (
-          <NavItem key={item.to + item.label} item={item} rail unreadCount={unreadCount} />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="pb-1">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={!collapsed}
-        aria-controls={contentId}
-        className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-ink-subtle transition-colors hover:text-ink-muted"
-      >
-        <ChevronRight
-          className={cx('h-3 w-3 shrink-0 transition-transform', !collapsed && 'rotate-90')}
-          aria-hidden="true"
-        />
-        <span className="eyebrow">{group.label}</span>
-      </button>
-      <div id={contentId} hidden={collapsed} className="mt-0.5 space-y-0.5">
-        {group.items.map((item) => (
-          <NavItem key={item.to + item.label} item={item} unreadCount={unreadCount} />
-        ))}
-      </div>
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function UserMenu({ user, onSignOut }) {
+/**
+ * Account menu. Rendered twice — once in the top island (pointer range) and
+ * once in the dock (thumb range) — so the shell's two islands are each
+ * self-sufficient. Theme and density are passed in rather than read from
+ * `useTheme`/`useDensity` here: two independent copies of those hooks would
+ * both write to storage but keep separate state, and the second menu would
+ * show a stale selection.
+ */
+function UserMenu({ user, onSignOut, theme, setTheme, density, setDensity, showLabels, setShowLabels, placement = 'bottom', variant = 'island' }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
-  const { theme, setTheme } = useTheme();
-  const { density, setDensity } = useDensity();
 
   useClickOutside(containerRef, open, () => setOpen(false));
   useEscapeKey(open, () => {
@@ -183,8 +117,12 @@ function UserMenu({ user, onSignOut }) {
     triggerRef.current?.focus();
   });
 
+  // The prefix match picks up `menuitemcheckbox` alongside plain `menuitem`,
+  // so the dock-labels toggle stays in the same roving cycle as the links.
+  const MENU_ITEMS = '[role^="menuitem"]';
+
   const focusItem = (index) => {
-    const items = menuRef.current?.querySelectorAll('[role="menuitem"]');
+    const items = menuRef.current?.querySelectorAll(MENU_ITEMS);
     if (!items?.length) return;
     const next = (index + items.length) % items.length;
     items[next].focus();
@@ -193,7 +131,7 @@ function UserMenu({ user, onSignOut }) {
   // Roving focus: the menu owns arrow keys so a pointer-free user can walk the
   // list without Tab escaping into the page behind the dropdown.
   const onMenuKeyDown = (event) => {
-    const items = Array.from(menuRef.current?.querySelectorAll('[role="menuitem"]') ?? []);
+    const items = Array.from(menuRef.current?.querySelectorAll(MENU_ITEMS) ?? []);
     const index = items.indexOf(document.activeElement);
     if (event.key === 'ArrowDown') {
       event.preventDefault();
@@ -217,9 +155,10 @@ function UserMenu({ user, onSignOut }) {
   }, [open]);
 
   const name = user?.fullName || user?.username || 'Account';
+  const dock = variant === 'dock';
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative shrink-0" ref={containerRef}>
       <button
         ref={triggerRef}
         type="button"
@@ -232,13 +171,23 @@ function UserMenu({ user, onSignOut }) {
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-md py-1 pl-1 pr-1.5 transition-colors hover:bg-surface-sunken"
+        aria-label={dock ? `Account: ${name}` : undefined}
+        className={cx(
+          'flex items-center rounded-full transition-[background-color,color,transform] duration-150 hover:-translate-y-0.5',
+          dock
+            ? 'h-10 w-10 justify-center hover:bg-accent-soft lg:h-11 lg:w-11'
+            : 'gap-2 py-1 pl-1 pr-2 hover:bg-accent-soft',
+        )}
       >
         <Avatar name={name} size="sm" />
-        <span className="hidden max-w-[9rem] truncate text-[0.8125rem] font-medium text-ink sm:block">
-          {name}
-        </span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
+        {!dock && (
+          <>
+            <span className="hidden max-w-[9rem] truncate text-[0.8125rem] font-semibold text-ink lg:block">
+              {name}
+            </span>
+            <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-ink-subtle lg:block" aria-hidden="true" />
+          </>
+        )}
       </button>
 
       {open && (
@@ -247,22 +196,30 @@ function UserMenu({ user, onSignOut }) {
           role="menu"
           aria-label="Account"
           onKeyDown={onMenuKeyDown}
-          className="animate-fade-up absolute right-0 z-50 mt-1.5 w-64 overflow-hidden rounded-lg border border-line bg-surface-raised shadow-overlay"
+          className={cx(
+            'absolute right-0 z-50 w-[17rem] overflow-hidden rounded-2xl border border-line bg-surface-raised shadow-overlay',
+            placement === 'top'
+              ? 'animate-pop-up bottom-full mb-3 origin-bottom-right'
+              : 'animate-scale-in top-full mt-2.5 origin-top-right',
+          )}
         >
-          <div className="border-b border-line px-3 py-2.5">
-            <p className="truncate text-[0.8125rem] font-semibold text-ink">{name}</p>
-            <p className="truncate text-xs text-ink-subtle">{user?.email}</p>
-            <p className="mt-1.5">
-              <Badge tone="accent">{ROLE_LABEL[user?.role] ?? 'Member'}</Badge>
-            </p>
+          <div className="accent-wash flex items-start gap-3 border-b border-line px-4 py-3.5">
+            <Avatar name={name} size="lg" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[0.8125rem] font-semibold text-ink">{name}</p>
+              <p className="truncate text-xs text-ink-subtle">{user?.email}</p>
+              <p className="mt-1.5">
+                <Badge tone="accent">{ROLE_LABEL[user?.role] ?? 'Member'}</Badge>
+              </p>
+            </div>
           </div>
 
-          <div className="p-1">
+          <div className="p-1.5">
             <Link
               to="/profile"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] text-ink-muted hover:bg-surface-sunken hover:text-ink"
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.8125rem] font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent-ink"
             >
               <User className="h-4 w-4 text-ink-subtle" aria-hidden="true" />
               Profile
@@ -271,14 +228,14 @@ function UserMenu({ user, onSignOut }) {
               to="/settings"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] text-ink-muted hover:bg-surface-sunken hover:text-ink"
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.8125rem] font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent-ink"
             >
               <Settings className="h-4 w-4 text-ink-subtle" aria-hidden="true" />
               Settings
             </Link>
           </div>
 
-          <div className="border-t border-line p-2">
+          <div className="border-t border-line p-2.5">
             <p className="eyebrow mb-1.5 px-1">Appearance</p>
             <SegmentedControl
               value={theme}
@@ -299,9 +256,36 @@ function UserMenu({ user, onSignOut }) {
                 { value: 'compact', label: 'Compact', icon: Rows3 },
               ]}
             />
+            {/* An icon-only dock is fast once learned and opaque before that.
+                The preference persists, so nobody has to relearn the strip on
+                every visit. */}
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={showLabels}
+              onClick={() => setShowLabels((value) => !value)}
+              className="mt-2.5 flex w-full items-center gap-2.5 rounded-xl px-1 py-2 text-left text-[0.8125rem] font-medium text-ink-muted transition-colors hover:text-accent-ink"
+            >
+              <Tags className="h-4 w-4 text-ink-subtle" aria-hidden="true" />
+              <span className="flex-1">Dock labels</span>
+              <span
+                aria-hidden="true"
+                className={cx(
+                  'flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  showLabels ? 'bg-accent' : 'bg-line-strong',
+                )}
+              >
+                <span
+                  className={cx(
+                    'h-4 w-4 rounded-full bg-surface shadow-card transition-transform duration-150',
+                    showLabels && 'translate-x-4',
+                  )}
+                />
+              </span>
+            </button>
           </div>
 
-          <div className="border-t border-line p-1">
+          <div className="border-t border-line p-1.5">
             <button
               type="button"
               role="menuitem"
@@ -309,7 +293,7 @@ function UserMenu({ user, onSignOut }) {
                 setOpen(false);
                 onSignOut();
               }}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[0.8125rem] text-ink-muted hover:bg-critical-soft hover:text-critical-ink"
+              className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[0.8125rem] font-medium text-ink-muted transition-colors hover:bg-critical-soft hover:text-critical-ink"
             >
               <LogOut className="h-4 w-4" aria-hidden="true" />
               Sign out
@@ -317,37 +301,6 @@ function UserMenu({ user, onSignOut }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function SegmentedControl({ value, onChange, options, ariaLabel }) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      className="grid grid-cols-2 gap-1 rounded-md border border-line bg-surface-sunken p-0.5"
-    >
-      {options.map((option) => {
-        const Icon = option.icon;
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onChange(option.value)}
-            className={cx(
-              'flex items-center justify-center gap-1.5 rounded-sm px-2 py-1 text-xs font-medium transition-colors',
-              selected ? 'bg-surface text-ink shadow-card' : 'text-ink-subtle hover:text-ink-muted',
-            )}
-          >
-            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-            {option.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -376,149 +329,68 @@ export function AppLayout() {
   const unreadCount = useUnreadCount();
   const palette = useCommandPalette();
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [rail, setRail] = usePersistentState('examforge-sidebar-rail', false);
-  const [collapsedGroups, setCollapsedGroups] = usePersistentState('examforge-nav-collapsed', {});
-  const drawerRef = useRef(null);
+  // Owned here, not inside the menus: both account menus and the island's theme
+  // switch must agree, and these hooks hold per-instance state.
+  const { theme, setTheme } = useTheme();
+  const { density, setDensity } = useDensity();
+  const [showLabels, setShowLabels] = usePersistentState('examforge-dock-labels', false);
 
   const trail = useShellTrail(groups, location.pathname);
-
-  useScrollLock(drawerOpen);
-  useEscapeKey(drawerOpen, () => setDrawerOpen(false));
-  useFocusTrap(drawerRef, drawerOpen);
-
-  // Leaving the drawer open after a click would cover the page just chosen.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [location.pathname]);
-
-  const toggleGroup = (id) =>
-    setCollapsedGroups((current) => ({ ...current, [id]: !current[id] }));
 
   const handleSignOut = async () => {
     await logout();
     navigate('/login', { replace: true });
   };
 
-  const sidebarBody = (asRail) => (
-    <nav
-      className={cx('scrollbar-slim flex-1 overflow-y-auto', asRail ? 'space-y-2 px-2 py-3' : 'space-y-1 p-3')}
-      aria-label="Main navigation"
-    >
-      {groups.map((group) => (
-        <NavGroup
-          key={group.id}
-          group={group}
-          rail={asRail}
-          collapsed={Boolean(collapsedGroups[group.id])}
-          onToggle={() => toggleGroup(group.id)}
-          unreadCount={unreadCount}
-        />
-      ))}
-    </nav>
-  );
+  const menuProps = {
+    user,
+    onSignOut: handleSignOut,
+    theme,
+    setTheme,
+    density,
+    setDensity,
+    showLabels,
+    setShowLabels,
+  };
 
   return (
     <div className="min-h-screen bg-canvas">
       <a
         href={`#${CONTENT_ID}`}
-        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[90] focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-accent-on"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[90] focus:rounded-full focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-accent-on focus:shadow-glow"
       >
         Skip to content
       </a>
 
-      {/* Desktop sidebar. The rail keeps icons and their tooltips so the map of
-          the product is still readable when horizontal space is scarce. */}
-      <aside
-        className={cx(
-          'fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-line bg-surface transition-[width] duration-200 lg:flex',
-          rail ? 'w-[3.75rem]' : 'w-60',
-        )}
-      >
-        <div className={cx('flex h-14 shrink-0 items-center border-b border-line', rail ? 'justify-center px-2' : 'px-4')}>
-          <Brand compact={rail} />
-        </div>
+      {/* The mesh is viewport-fixed rather than painted on the page: a gradient
+          stretched down a 4000px report stops reading as a ground and starts
+          reading as a banner. */}
+      <div aria-hidden="true" className="mesh pointer-events-none fixed inset-0" />
 
-        {sidebarBody(rail)}
+      {/* Top island (L3). Inset from every edge — it is a floating pane, not a
+          bar welded to the top of the viewport. */}
+      <header className="fixed inset-x-0 top-0 z-30 px-3 pt-3 sm:px-5 sm:pt-4">
+        <div className="glass mx-auto flex h-14 max-w-shell items-center gap-3 rounded-2xl px-3 sm:px-4">
+          <Brand size="sm" showWord={false} className="shrink-0 lg:hidden" />
+          <Brand size="sm" className="hidden shrink-0 lg:flex" />
 
-        <div className="shrink-0 border-t border-line p-2">
-          <button
-            type="button"
-            onClick={() => setRail((value) => !value)}
-            className={cx(
-              'btn btn-sm w-full text-ink-subtle hover:bg-surface-sunken hover:text-ink',
-              rail && 'px-0',
-            )}
-            aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {rail ? (
-              <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <>
-                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-                <span>Collapse</span>
-              </>
-            )}
-          </button>
-        </div>
-      </aside>
+          <span aria-hidden="true" className="h-5 w-px shrink-0 bg-line-strong/60" />
 
-      {/* Mobile drawer */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div
-            className="animate-fade-in absolute inset-0 bg-[rgb(var(--shadow))]/50"
-            onClick={() => setDrawerOpen(false)}
-            aria-hidden="true"
-          />
-          <div
-            ref={drawerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Navigation"
-            className="animate-slide-in relative flex h-full w-[17rem] flex-col border-r border-line bg-surface shadow-overlay"
-          >
-            <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-4">
-              <Brand />
-              <button
-                type="button"
-                className="btn btn-sm px-1.5 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Close navigation"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-            {sidebarBody(false)}
-          </div>
-        </div>
-      )}
-
-      <div className={cx('transition-[padding] duration-200', rail ? 'lg:pl-[3.75rem]' : 'lg:pl-60')}>
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-surface/90 px-3 backdrop-blur-md sm:px-5">
-          <button
-            type="button"
-            className="btn btn-sm px-1.5 text-ink-muted hover:bg-surface-sunken hover:text-ink lg:hidden"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open navigation"
-            aria-expanded={drawerOpen}
-          >
-            <Menu className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
-          </button>
-
+          {/* Set in mono caps: this is a location readout, not prose, and the
+              fixed advance keeps it from twitching as routes change. */}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 md:block">
-            <ol className="flex items-center gap-1.5 text-[0.8125rem] text-ink-subtle">
+            <ol className="flex items-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[0.09em] text-ink-subtle">
               <li className="shrink-0">{ROLE_LABEL[user?.role] ?? 'Workspace'}</li>
               {trail && (
                 <>
-                  <li aria-hidden="true">
-                    <ChevronRight className="h-3.5 w-3.5" />
+                  <li className="shrink-0 text-line-strong" aria-hidden="true">
+                    /
                   </li>
                   <li className="shrink-0">{trail.group.label}</li>
-                  <li aria-hidden="true">
-                    <ChevronRight className="h-3.5 w-3.5" />
+                  <li className="shrink-0 text-line-strong" aria-hidden="true">
+                    /
                   </li>
-                  <li className="min-w-0 truncate font-medium text-ink" aria-current="page">
+                  <li className="min-w-0 truncate font-semibold text-ink" aria-current="page">
                     {trail.item.label}
                   </li>
                 </>
@@ -526,41 +398,71 @@ export function AppLayout() {
             </ol>
           </nav>
 
-          <div className="ml-auto flex items-center gap-1">
+          {/* Below md the trail collapses to the one thing worth the width. */}
+          {trail && (
+            <p className="min-w-0 truncate text-[0.8125rem] font-semibold text-ink md:hidden">
+              {trail.item.label}
+            </p>
+          )}
+
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {/* The dock carries a ⌘K button of its own for thumbs; this is the
+                discoverable, hint-bearing version for pointers. */}
             <button
               type="button"
               onClick={() => palette.setOpen(true)}
-              className="btn btn-sm gap-2 border border-line-strong bg-surface text-ink-subtle hover:border-ink-subtle hover:text-ink-muted"
               aria-label="Open command palette"
+              className="hidden h-9 items-center gap-2 rounded-full border border-line-strong bg-surface/70 pl-3 pr-1.5 text-ink-subtle transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink sm:flex sm:w-56"
             >
-              <Search className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="hidden text-[0.8125rem] sm:inline">Search</span>
-              <kbd className="hidden items-center gap-0.5 rounded-sm border border-line bg-surface-sunken px-1 font-mono text-[0.625rem] text-ink-subtle sm:flex">
+              <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="text-[0.8125rem]">Search…</span>
+              <kbd className="ml-auto flex items-center gap-0.5 rounded-full border border-line bg-surface-sunken px-2 py-0.5 font-mono text-[0.625rem] font-medium text-ink-subtle">
                 <Command className="h-2.5 w-2.5" aria-hidden="true" />K
               </kbd>
             </button>
 
-            <Link
-              to="/notifications"
-              className="btn btn-sm relative px-1.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
-              aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+            {/* Theme gets a one-click switch because it is flipped mid-task;
+                density is a set-once preference and stays in the menu. */}
+            <button
+              type="button"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent-ink"
             >
-              <Bell className="h-4 w-4" aria-hidden="true" />
-              {unreadCount > 0 && (
-                <span className="tabular absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-critical px-1 text-[0.625rem] font-semibold leading-none text-critical-on">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
+              {theme === 'dark' ? (
+                <Moon className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Sun className="h-4 w-4" aria-hidden="true" />
               )}
-            </Link>
+            </button>
 
-            <UserMenu user={user} onSignOut={handleSignOut} />
+            {/* Below lg the dock's avatar is the only account menu: two of them
+                on a phone screen is noise, and `hidden` keeps the duplicate out
+                of the accessibility tree rather than merely out of sight. */}
+            <div className="hidden lg:block">
+              <UserMenu {...menuProps} placement="bottom" variant="island" />
+            </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <main id={CONTENT_ID} tabIndex={-1} className="mx-auto max-w-[88rem] p-4 sm:p-6 lg:px-8 lg:py-7">
-          <Outlet />
-        </main>
-      </div>
+      {/* `relative` lifts the page above the fixed mesh layer. */}
+      <main
+        id={CONTENT_ID}
+        tabIndex={-1}
+        className="pb-dock relative mx-auto max-w-shell px-4 pt-[5.75rem] sm:px-6 sm:pt-[6.5rem] lg:px-10"
+      >
+        <Outlet />
+      </main>
+
+      <Dock
+        groups={groups}
+        activeGroupId={trail?.group.id}
+        unreadCount={unreadCount}
+        onOpenPalette={() => palette.setOpen(true)}
+        showLabels={showLabels}
+        userMenu={<UserMenu {...menuProps} placement="top" variant="dock" />}
+      />
 
       <CommandPalette open={palette.open} onClose={palette.close} />
     </div>

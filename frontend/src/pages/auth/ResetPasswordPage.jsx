@@ -54,11 +54,11 @@ export function ResetPasswordPage() {
   if (!token) {
     return (
       <div>
-        <span className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-md border border-caution/30 bg-caution-soft text-caution-ink">
-          <TriangleAlert className="h-4 w-4" aria-hidden="true" />
+        <span className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-caution-soft text-caution-ink ring-1 ring-inset ring-caution/25">
+          <TriangleAlert className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
         </span>
         <h1 className="text-display text-ink">This link is incomplete</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
+        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
           The reset link is missing its token. Mail clients sometimes truncate long links; request a
           fresh one and open it directly from the message.
         </p>
@@ -72,11 +72,11 @@ export function ResetPasswordPage() {
   if (done) {
     return (
       <div>
-        <span className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-md border border-positive/30 bg-positive-soft text-positive-ink">
-          <CircleCheck className="h-4 w-4" aria-hidden="true" />
+        <span className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-positive-soft text-positive-ink ring-1 ring-inset ring-positive/25">
+          <CircleCheck className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
         </span>
         <h1 className="text-display text-ink">Password updated</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
+        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
           Every other session has been signed out. Use the new password from here on.
         </p>
         <Button as={Link} to="/login" variant="primary" size="lg" className="mt-7 w-full">
@@ -89,7 +89,7 @@ export function ResetPasswordPage() {
   return (
     <div>
       <h1 className="text-display text-ink">Choose a new password</h1>
-      <p className="mt-1.5 text-sm text-ink-muted">
+      <p className="mt-2 text-sm leading-relaxed text-ink-muted">
         Signing in with the new password ends every other active session.
       </p>
 
