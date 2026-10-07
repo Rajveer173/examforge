@@ -1,7 +1,7 @@
 // The seed runs outside the app, so it loads .env itself rather than
 // inheriting DATABASE_URL from an already-booted process.
 import 'dotenv/config';
-import { PrismaClient, Role, QuestionType, Difficulty, TestStatus, ExamMode } from '@prisma/client';
+import { PrismaClient, Role, QuestionType, Difficulty, TestStatus, ExamMode, AttemptStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -492,6 +492,136 @@ async function main() {
       update: {},
       create: { poolId: pool.id, questionId: q1.id },
     }).catch(() => {});
+
+    // Demo Evaluated Attempt for Student (Score: 16/20 - 80%, Passed)
+    const demoAttempt = await prisma.attempt.upsert({
+      where: { id: 'attempt-demo-1' },
+      update: { score: 16, percentage: 80, passed: true, status: AttemptStatus.EVALUATED },
+      create: {
+        id: 'attempt-demo-1',
+        testId: test.id,
+        studentId: student.id,
+        status: AttemptStatus.EVALUATED,
+        score: 16,
+        percentage: 80,
+        passed: true,
+        timeTakenSeconds: 1420,
+        startedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        submittedAt: new Date(Date.now() - 24 * 60 * 60 * 1000 + 24 * 60 * 1000),
+        suspicionScore: 0,
+      },
+    });
+
+    const q1Options = await prisma.questionOption.findMany({ where: { questionId: q1.id } });
+    const q1Correct = q1Options.find((o) => o.isCorrect);
+    const q4Options = await prisma.questionOption.findMany({ where: { questionId: q4.id } });
+    const q4Correct = q4Options.find((o) => o.isCorrect);
+    const q8Options = await prisma.questionOption.findMany({ where: { questionId: q8.id } });
+    const q8Wrong = q8Options.find((o) => !o.isCorrect);
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q1.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q1.id,
+        optionId: q1Correct?.id,
+        isCorrect: true,
+        marksObtained: 2,
+        timeSpentSeconds: 45,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q2.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q2.id,
+        answerJson: { selected: ['boolean', 'number', 'string'] },
+        isCorrect: true,
+        marksObtained: 3,
+        timeSpentSeconds: 65,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q4.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q4.id,
+        optionId: q4Correct?.id,
+        isCorrect: true,
+        marksObtained: 2,
+        timeSpentSeconds: 20,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q5.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q5.id,
+        answerJson: { text: 'JSON.parse' },
+        isCorrect: true,
+        marksObtained: 2,
+        timeSpentSeconds: 30,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q6.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q6.id,
+        answerJson: { text: 'let allows re-assignment and is block-scoped. const is also block-scoped but cannot be re-assigned.' },
+        isCorrect: true,
+        marksObtained: 5,
+        timeSpentSeconds: 180,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q7.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q7.id,
+        answerJson: { code: 'function add(a, b) {\n  return a + b;\n}' },
+        isCorrect: true,
+        marksObtained: 8,
+        timeSpentSeconds: 240,
+      },
+    }).catch(() => {});
+
+    await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: demoAttempt.id, questionId: q8.id } },
+      update: {},
+      create: {
+        attemptId: demoAttempt.id,
+        questionId: q8.id,
+        optionId: q8Wrong?.id,
+        isCorrect: false,
+        marksObtained: 0,
+        timeSpentSeconds: 50,
+      },
+    }).catch(() => {});
+
+    // Populate question analytics
+    await prisma.questionAnalytics.upsert({
+      where: { questionId: q1.id },
+      update: { attemptCount: 1, correctCount: 1, accuracy: 100 },
+      create: { questionId: q1.id, attemptCount: 1, correctCount: 1, accuracy: 100, avgTimeSeconds: 45 },
+    }).catch(() => {});
+
+    await prisma.questionAnalytics.upsert({
+      where: { questionId: q8.id },
+      update: { attemptCount: 1, incorrectCount: 1, accuracy: 0 },
+      create: { questionId: q8.id, attemptCount: 1, incorrectCount: 1, accuracy: 0, avgTimeSeconds: 50 },
+    }).catch(() => {});
   }
 
   // Coding problem (always upsert, independent of question count)
@@ -630,6 +760,155 @@ async function main() {
       testsTaken: 1,
       avgPercentage: 90,
       rank: 1,
+    },
+  });
+
+  // Demo Placement Profile (POD Registration)
+  await prisma.placementProfile.upsert({
+    where: { userId: student.id },
+    update: {
+      fullName: 'Alex Student',
+      rollNumber: 'CS2024-042',
+      phone: '+1 555-0199',
+      branch: 'Computer Science',
+      cgpa: 8.75,
+      tenthPercentage: 92.0,
+      twelfthPercentage: 89.5,
+      skills: ['React', 'Node.js', 'TypeScript', 'SQL', 'Python'],
+      githubUrl: 'https://github.com/alexstudent',
+      linkedinUrl: 'https://linkedin.com/in/alexstudent',
+      isVerified: true,
+    },
+    create: {
+      userId: student.id,
+      fullName: 'Alex Student',
+      rollNumber: 'CS2024-042',
+      phone: '+1 555-0199',
+      branch: 'Computer Science',
+      cgpa: 8.75,
+      tenthPercentage: 92.0,
+      tenthPercentage: 92.4,
+      twelfthPercentage: 89.5,
+      activeBacklogs: 0,
+      graduationYear: 2026,
+      skills: ['React', 'Node.js', 'TypeScript', 'SQL', 'Python'],
+      githubUrl: 'https://github.com/alexstudent',
+      linkedinUrl: 'https://linkedin.com/in/alexstudent',
+      isVerified: true,
+    },
+  });
+
+  // Demo Placement Drives
+  const driveGoogle = await prisma.placementDrive.upsert({
+    where: { id: 'drive-google-sde' },
+    update: {},
+    create: {
+      id: 'drive-google-sde',
+      companyName: 'Google',
+      role: 'Software Engineer Intern',
+      description: 'Design scalable distributed systems, collaborate with cross-functional engineering teams, and implement algorithmic solutions in C++ or Python.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 8.0,
+      eligibleBranches: ['Computer Science', 'Information Technology', 'Electronics'],
+      maxBacklogs: 0,
+      minTenthPercent: 75.0,
+      minTwelfthPercent: 75.0,
+      batchYear: 2026,
+      ctcLpa: 24.5,
+      location: 'Bangalore / Hybrid',
+      deadline: new Date(Date.now() + 14 * 24 * 3600 * 1000),
+      driveDate: new Date(Date.now() + 20 * 24 * 3600 * 1000),
+      status: 'ACTIVE',
+      createdById: admin.id,
+    },
+  });
+
+  await prisma.placementDrive.upsert({
+    where: { id: 'drive-microsoft-sde' },
+    update: {},
+    create: {
+      id: 'drive-microsoft-sde',
+      companyName: 'Microsoft',
+      role: 'Software Development Engineer',
+      description: 'Build enterprise cloud native applications on Azure, high-throughput microservices, and AI-assisted workflows.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 7.5,
+      eligibleBranches: ['Computer Science', 'Information Technology'],
+      maxBacklogs: 0,
+      minTenthPercent: 70.0,
+      minTwelfthPercent: 70.0,
+      batchYear: 2026,
+      ctcLpa: 18.0,
+      location: 'Hyderabad / On-site',
+      deadline: new Date(Date.now() + 21 * 24 * 3600 * 1000),
+      driveDate: new Date(Date.now() + 28 * 24 * 3600 * 1000),
+      status: 'ACTIVE',
+      createdById: teacher.id,
+    },
+  });
+
+  await prisma.placementDrive.upsert({
+    where: { id: 'drive-amazon-sde' },
+    update: {},
+    create: {
+      id: 'drive-amazon-sde',
+      companyName: 'Amazon',
+      role: 'Associate SDE - Off Campus',
+      description: 'National recruitment drive for graduating batches with strong problem-solving skills, object-oriented design, and system architecture fundamentals.',
+      driveType: 'OFF_CAMPUS',
+      eligibilityCgpa: 6.5,
+      eligibleBranches: ['Computer Science', 'Information Technology', 'Electronics', 'Mechanical'],
+      maxBacklogs: 1,
+      minTenthPercent: 60.0,
+      minTwelfthPercent: 60.0,
+      batchYear: 2026,
+      ctcLpa: 16.0,
+      location: 'Multiple Locations / Remote',
+      deadline: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+      driveDate: new Date(Date.now() + 35 * 24 * 3600 * 1000),
+      status: 'ACTIVE',
+      createdById: admin.id,
+    },
+  });
+
+  await prisma.placementDrive.upsert({
+    where: { id: 'drive-goldman-sachs' },
+    update: {},
+    create: {
+      id: 'drive-goldman-sachs',
+      companyName: 'Goldman Sachs',
+      role: 'Quantitative Analyst / SDE',
+      description: 'High-frequency algorithmic trading desk engineering. Requires stellar academic record and advanced data structures.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 9.0, // Alex (8.75) is ineligible for this drive!
+      eligibleBranches: ['Computer Science'],
+      maxBacklogs: 0,
+      minTenthPercent: 85.0,
+      minTwelfthPercent: 85.0,
+      batchYear: 2026,
+      ctcLpa: 32.0,
+      location: 'Bangalore / On-site',
+      deadline: new Date(Date.now() + 10 * 24 * 3600 * 1000),
+      driveDate: new Date(Date.now() + 15 * 24 * 3600 * 1000),
+      status: 'ACTIVE',
+      createdById: admin.id,
+    },
+  });
+
+  // Demo Application for Alex Student
+  await prisma.placementApplication.upsert({
+    where: {
+      driveId_studentId: {
+        driveId: driveGoogle.id,
+        studentId: student.id,
+      },
+    },
+    update: {},
+    create: {
+      driveId: driveGoogle.id,
+      studentId: student.id,
+      status: 'SHORTLISTED',
+      notes: 'Passed initial coding assessment round with top score.',
     },
   });
 

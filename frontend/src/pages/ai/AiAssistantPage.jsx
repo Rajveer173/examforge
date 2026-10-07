@@ -125,17 +125,20 @@ export function AiAssistantPage() {
           ) : (
             <>
               <div className="flex-1 space-y-4 overflow-y-auto p-4">
-                {messages.map((m) => (
-                  <div key={m.id} className={`flex ${m.role === 'student' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[75%] rounded-xl px-4 py-2 text-sm ${
-                        m.role === 'student' ? 'bg-accent text-white' : 'bg-canvas text-ink'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{m.content}</p>
+                {messages.map((m) => {
+                  const isUser = m.role === 'student' || m.role === 'user';
+                  return (
+                    <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[75%] rounded-xl px-4 py-2 text-sm ${
+                          isUser ? 'bg-accent text-white' : 'bg-canvas text-ink'
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{m.content}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {busy && <div className="text-sm text-ink-subtle">Thinking…</div>}
                 <div ref={bottomRef} />
               </div>

@@ -62,6 +62,8 @@ const AiAssistantPage = page(() => import('../pages/ai/AiAssistantPage.jsx'), 'A
 const SearchResultsPage = page(() => import('../pages/search/SearchResultsPage.jsx'), 'SearchResultsPage');
 const OrganizationsPage = page(() => import('../pages/organizations/OrganizationsPage.jsx'), 'OrganizationsPage');
 const SettingsPage = page(() => import('../pages/SettingsPage.jsx'), 'SettingsPage');
+const PlacementPage = page(() => import('../pages/placement/PlacementPage.jsx'), 'PlacementPage');
+const AdminPlacementPage = page(() => import('../pages/placement/AdminPlacementPage.jsx'), 'AdminPlacementPage');
 
 export const roleHome = {
   ADMIN: '/admin',
@@ -132,6 +134,7 @@ export function AppRoutes() {
         <Route path="/admin/results/:attemptId" element={guard(['ADMIN'], <AdminResultDetailPage />)} />
         <Route path="/admin/proctoring" element={guard(['ADMIN'], <ProctoringDashboard />)} />
         <Route path="/admin/audit" element={guard(['ADMIN'], <AdminAuditPage />)} />
+        <Route path="/admin/placements" element={guard(['ADMIN'], <AdminPlacementPage />)} />
 
         <Route path="/teacher" element={guard(['TEACHER'], <TeacherDashboard />)} />
         <Route path="/teacher/courses" element={guard(['TEACHER'], <CoursesPage />)} />
@@ -145,6 +148,7 @@ export function AppRoutes() {
         <Route path="/teacher/results" element={guard(['TEACHER'], <TeacherResults />)} />
         <Route path="/teacher/results/:attemptId" element={guard(['TEACHER'], <TeacherResultDetail />)} />
         <Route path="/teacher/proctoring" element={guard(['TEACHER'], <ProctoringDashboard />)} />
+        <Route path="/teacher/placements" element={guard(['TEACHER'], <AdminPlacementPage />)} />
 
         <Route path="/proctoring" element={guard(['PROCTOR', 'ADMIN', 'TEACHER'], <ProctoringDashboard />)} />
 
@@ -157,6 +161,7 @@ export function AppRoutes() {
         <Route path="/student/results" element={guard(['STUDENT'], <StudentResults />)} />
         <Route path="/student/results/:attemptId" element={guard(['STUDENT'], <StudentResultDetail />)} />
         <Route path="/student/progress" element={guard(['STUDENT'], <StudentProgressPage />)} />
+        <Route path="/placements" element={guard(['STUDENT'], <PlacementPage />)} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

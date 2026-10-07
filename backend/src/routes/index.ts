@@ -23,6 +23,7 @@ import { aiRouter } from './ai.routes.js';
 import { analyticsRouter } from './analytics.routes.js';
 import { healthRouter, versionRouter } from './health.routes.js';
 import { searchRouter } from './search.routes.js';
+import { placementRouter } from './placement.routes.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/authorize.js';
 import { metricsHandler } from '../monitoring/metrics.js';
@@ -71,6 +72,7 @@ apiRouter.use('/search', searchLimiter, searchRouter);
 apiRouter.use('/analytics', analyticsRouter);
 apiRouter.use('/certificates', certificateRouter);
 apiRouter.use('/leaderboards', leaderboardRouter);
+apiRouter.use('/placements', placementRouter);
 // Student attempt routes must precede testRouter so GET /tests/assigned and
 // POST /tests/:testId/start are not shadowed by GET /tests/:id.
 apiRouter.use(attemptWriteLimiter, attemptRouter);

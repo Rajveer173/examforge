@@ -238,6 +238,9 @@ model User {
   aiConversations        AIConversation[]
   recommendations        Recommendation[]
   createdCodingProblems  CodingProblem[]
+  placementProfile       PlacementProfile?
+  placementApplications  PlacementApplication[]
+  createdPlacementDrives PlacementDrive[]      @relation("DriveCreatedBy")
 
   @@index([role])
   @@index([organizationId])
@@ -1008,3 +1011,72 @@ model Recommendation {
 
   @@index([userId])
 }
+
+model PlacementProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName          String
+  rollNumber        String?
+  phone             String?
+  branch            String?
+  cgpa              Float    @default(0.0)
+  tenthPercentage   Float?
+  twelfthPercentage Float?
+  skills            Json?
+  activeBacklogs    Int      @default(0)
+  graduationYear    Int?
+  resumeUrl         String?
+  githubUrl         String?
+  linkedinUrl       String?
+  isVerified        Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model PlacementDrive {
+  id               String                 @id @default(cuid())
+  companyName      String
+  role             String
+  description      String?                @db.Text
+  driveType        String                 @default("ON_CAMPUS") // ON_CAMPUS or OFF_CAMPUS
+  eligibilityCgpa  Float                  @default(0.0)
+  eligibleBranches Json?
+  maxBacklogs      Int                    @default(0)
+  minTenthPercent  Float?                 @default(0.0)
+  minTwelfthPercent Float?                @default(0.0)
+  batchYear        Int?
+  ctcLpa           Float?
+  location         String?
+  deadline         DateTime
+  driveDate        DateTime?
+  status           String                 @default("UPCOMING") // UPCOMING, ACTIVE, COMPLETED, CANCELLED
+  createdById      String
+  createdBy        User                   @relation("DriveCreatedBy", fields: [createdById], references: [id])
+  applications     PlacementApplication[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([createdById])
+  @@index([status])
+  @@index([driveType])
+}
+
+model PlacementApplication {
+  id        String         @id @default(cuid())
+  driveId   String
+  drive     PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  studentId String
+  student   User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status    String         @default("APPLIED") // APPLIED, SHORTLISTED, INTERVIEWED, SELECTED, REJECTED
+  appliedAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  notes     String?        @db.Text
+
+  @@unique([driveId, studentId])
+  @@index([studentId])
+  @@index([driveId])
+}
+

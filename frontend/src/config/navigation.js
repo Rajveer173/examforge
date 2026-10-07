@@ -3,6 +3,7 @@ import {
   BookMarked,
   BookOpen,
   Bot,
+  Briefcase,
   Building2,
   ChartNoAxesColumn,
   ClipboardList,
@@ -87,6 +88,13 @@ export const NAV_BY_ROLE = {
         { to: '/admin/proctoring', label: 'Proctoring', icon: Video },
       ],
     },
+    {
+      id: 'career',
+      label: 'Career',
+      items: [
+        { to: '/admin/placements', label: 'Placements', icon: Briefcase },
+      ],
+    },
     { id: 'workspace', label: 'Workspace', items: workspaceItems },
   ],
 
@@ -121,6 +129,13 @@ export const NAV_BY_ROLE = {
         { to: '/teacher/proctoring', label: 'Proctoring', icon: Video },
       ],
     },
+    {
+      id: 'career',
+      label: 'Career',
+      items: [
+        { to: '/teacher/placements', label: 'Placements', icon: Briefcase },
+      ],
+    },
     { id: 'workspace', label: 'Workspace', items: workspaceItems },
   ],
 
@@ -149,6 +164,13 @@ export const NAV_BY_ROLE = {
       items: [
         { to: '/student/results', label: 'Results', icon: SquareCheckBig },
         { to: '/student/progress', label: 'My progress', icon: TrendingUp },
+      ],
+    },
+    {
+      id: 'career',
+      label: 'Career',
+      items: [
+        { to: '/placements', label: 'Placements', icon: Briefcase },
       ],
     },
     { id: 'workspace', label: 'Workspace', items: workspaceItems },
