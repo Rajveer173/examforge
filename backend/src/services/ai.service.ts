@@ -727,7 +727,7 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
     q.includes('improve')
   ) {
     const studentAttempts = await prisma.attempt.findMany({
-      where: { studentId: user.id },
+      where: { studentId: user.id, status: { in: ['SUBMITTED', 'EVALUATED'] } },
       include: {
         test: true,
         answers: {
@@ -747,7 +747,7 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
         take: 3,
       });
 
-      let msg = `### 🎯 Personal Learning & Performance Diagnostic\n\nYou haven't taken any tests on ExamForge yet!\n\n`;
+      let msg = `### 🎯 Personal Learning & Performance Diagnostic\n\nYou haven't submitted any tests on ExamForge yet!\n\n`;
       if (availableTests.length > 0) {
         msg += `#### 📝 Available Tests You Can Take Now:\n`;
         for (const t of availableTests) {
@@ -786,6 +786,8 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
       response += `1. **Review Theory**: Re-read the module lessons on ${incorrectAnswers.map((a) => a.question.topic || 'the missed topics').filter((v, i, a) => a.indexOf(v) === i).join(', ')}.\n`;
       response += `2. **Hands-on Practice**: Re-run the coding exercises and solve 3 practice questions on these specific topics.\n`;
       response += `3. **Retake Exam**: Schedule another attempt once you feel confident to boost your rank on the leaderboard!\n`;
+    } else if (correctAnswers.length === 0) {
+      response += `Your answers for this test have not been graded yet. Check back once your teacher has evaluated it.`;
     } else {
       response += `🌟 **Outstanding job!** You answered all evaluated questions correctly! You have mastered this module. Consider moving to the next course topic or attempting intermediate coding challenges.`;
     }
