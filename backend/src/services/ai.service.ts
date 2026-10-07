@@ -1,12 +1,7 @@
 import { prisma } from '../config/database.js';
 import { AppError } from '../utils/errors.js';
-import { env } from '../config/env.js';
-import axios from 'axios';
-
-const AI = axios.create({
-  baseURL: env.AI_SERVICE_URL,
-  timeout: 60000,
-});
+import type { ChatMessage } from './llm.js';
+import { adviseOnAttempt, generateQuestionsWithModel, recommendStudy, tutorReply } from './ai.model.js';
 
 export async function createConversation(userId: string, input: { title?: string; topic?: string; courseId?: string }) {
   return prisma.aIConversation.create({
@@ -50,6 +45,12 @@ interface UserContext {
   role: string;
 }
 
+/** Short openers like "hi" or "what can you do" get the capabilities menu. */
+function isGreeting(query: string) {
+  const q = query.trim().toLowerCase().replace(/[!?.]+$/, '');
+  return q.length < 40 && /^(hi|hello|hey|yo|help|start|menu|good (morning|afternoon|evening)|what can you do)/.test(q);
+}
+
 /**
  * Handle Admin and Teacher queries:
  * 1. Test performance summaries and class statistics
@@ -57,7 +58,7 @@ interface UserContext {
  * 3. Question generation and curriculum insights
  * 4. Proctoring and suspicion analysis
  */
-async function handleStaffQuery(query: string, user: UserContext, topic?: string | null): Promise<string> {
+async function handleStaffQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
   const q = query.toLowerCase();
 
   // 1. Placement Drives & Placement Cell Management (Admin / Teacher)
@@ -391,7 +392,7 @@ async function handleStaffQuery(query: string, user: UserContext, topic?: string
 
   // 3. Question Generation / Curriculum Creation
   if (q.includes('generate') || q.includes('create question') || q.includes('mcq') || q.includes('quiz')) {
-    return generateSmartQuestionSet(query);
+    return (await tutorReply(user, history, topic)) ?? generateSmartQuestionSet(query);
   }
 
   // 4. Proctoring & Anti-Cheat Summary
@@ -583,7 +584,12 @@ async function handleStaffQuery(query: string, user: UserContext, topic?: string
     return res;
   }
 
-  // 7. Default Staff Assistant Guidance
+  if (!isGreeting(query)) {
+    const reply = await tutorReply(user, history, topic);
+    if (reply) return reply;
+  }
+
+  // 7. Default Staff Assistant Guidance (greetings, or when the model is offline)
   return `### 👨‍🏫 ExamForge Staff Assistant
 
 Hello **${user.name || 'Instructor'}**! As a **${user.role}**, here is what I can do for you in real-time:
@@ -606,7 +612,7 @@ What would you like to review today?`;
  * 4. Step-by-step coding problem guidance
  * 5. Course and test preparation information
  */
-async function handleStudentQuery(query: string, user: UserContext, topic?: string | null): Promise<string> {
+async function handleStudentQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
   const q = query.toLowerCase();
 
   // 0. Security Isolation - Block student access to admin, teacher, staff, other students, system internals
@@ -706,7 +712,7 @@ async function handleStudentQuery(query: string, user: UserContext, topic?: stri
     q.includes('step by step') ||
     q.includes('where to start')
   ) {
-    return generateRoadmap(query);
+    return (await tutorReply(user, history, topic)) ?? generateRoadmap(query);
   }
 
   // 2. Personal Test Performance & Diagnostic
@@ -789,7 +795,7 @@ async function handleStudentQuery(query: string, user: UserContext, topic?: stri
 
   // 3. Coding Problem / Hint Request
   if (q.includes('two sum') || q.includes('reverse string') || q.includes('binary search') || q.includes('code problem') || q.includes('algorithm')) {
-    return generateCodingTutorHelp(query);
+    return (await tutorReply(user, history, topic)) ?? generateCodingTutorHelp(query);
   }
 
   // 4. Programming Concept Explanation
@@ -805,10 +811,15 @@ async function handleStudentQuery(query: string, user: UserContext, topic?: stri
     q.includes('python') ||
     q.includes('sql')
   ) {
-    return generateConceptExplanation(query);
+    return (await tutorReply(user, history, topic)) ?? generateConceptExplanation(query);
   }
 
-  // 5. Default Student Assistant Greeting
+  if (!isGreeting(query)) {
+    const reply = await tutorReply(user, history, topic);
+    if (reply) return reply;
+  }
+
+  // 5. Default Student Assistant Greeting (greetings, or when the model is offline)
   return `### 🎓 ExamForge AI Study Companion
 
 Hi **${user.name || 'Student'}**! I am your personal AI tutor and learning advisor. Here is how I can help you succeed:
@@ -1172,58 +1183,36 @@ export async function sendTutorMessage(userId: string, conversationId: string, c
     }).catch(() => {});
   }
 
-  let reply = '';
-  let sources: unknown = null;
+  // Most recent turns, oldest first, including the message just recorded.
+  const recent = await prisma.aIMessage.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+  });
+  const history: ChatMessage[] = recent
+    .reverse()
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-  // If an external AI provider (OpenAI / Gemini / microservice) is configured, try it
-  if (env.OPENAI_API_KEY || (env.AI_PROVIDER !== 'external' && env.AI_SERVICE_URL)) {
-    try {
-      const history = await prisma.aIMessage.findMany({
-        where: { conversationId },
-        orderBy: { createdAt: 'asc' },
-        take: 10,
-      });
+  const userCtx: UserContext = {
+    id: user.id,
+    name: user.fullName || user.username,
+    email: user.email,
+    role: user.role,
+  };
 
-      const resp = await AI.post('/tutor', {
-        conversationId,
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
-        topic: conv.topic,
-        courseId: conv.courseId,
-        userRole: user.role,
-      });
-
-      if (resp.data?.reply) {
-        reply = resp.data.reply;
-        sources = resp.data.sources ?? null;
-      }
-    } catch {
-      // Fall through seamlessly to the built-in intelligent engine
-      reply = '';
-    }
-  }
-
-  // If no external reply, use our high-capability built-in AI Engine
-  if (!reply) {
-    const userCtx: UserContext = {
-      id: user.id,
-      name: user.fullName || user.username,
-      email: user.email,
-      role: user.role,
-    };
-
-    if (user.role === 'ADMIN' || user.role === 'TEACHER' || user.role === 'ORG_ADMIN') {
-      reply = await handleStaffQuery(content, userCtx, conv.topic);
-    } else {
-      reply = await handleStudentQuery(content, userCtx, conv.topic);
-    }
-  }
+  // Questions about platform records are answered from the database; open-ended
+  // ones go to the model, with the built-in engine as the offline fallback.
+  const reply =
+    user.role === 'ADMIN' || user.role === 'TEACHER' || user.role === 'ORG_ADMIN'
+      ? await handleStaffQuery(content, userCtx, history, conv.topic)
+      : await handleStudentQuery(content, userCtx, history, conv.topic);
 
   const assistantMsg = await prisma.aIMessage.create({
     data: {
       conversationId,
       role: 'assistant',
       content: reply,
-      sources: sources as any,
     },
   });
 
@@ -1247,21 +1236,22 @@ export async function generateQuestions(input: {
   type?: string;
   createdById: string;
 }) {
-  // If external AI is connected, attempt generation
-  if (env.OPENAI_API_KEY) {
-    try {
-      const resp = await AI.post('/generate-questions', input);
-      if (resp.data) return resp.data;
-    } catch {
-      // Fallback to built-in generator
-    }
-  }
-
-  // Built-in Question Generator
-  const generated: any[] = [];
   const count = Math.min(Math.max(input.count || 3, 1), 10);
   const diff = input.difficulty.toUpperCase();
-  const qType = (input.type || 'SINGLE').toUpperCase();
+  const requestedType = (input.type || 'SINGLE').toUpperCase();
+  const qType = ['SINGLE', 'MULTIPLE', 'TRUE_FALSE', 'CODING'].includes(requestedType) ? requestedType : 'SINGLE';
+
+  const fromModel = await generateQuestionsWithModel({
+    subject: input.subject,
+    topic: input.topic,
+    difficulty: diff,
+    count,
+    type: qType,
+  });
+  if (fromModel) return fromModel;
+
+  // Built-in template generator (model offline)
+  const generated: any[] = [];
 
   for (let i = 1; i <= count; i++) {
     if (qType === 'CODING') {
@@ -1315,8 +1305,10 @@ export async function generateQuestions(input: {
       subject: input.subject,
       topic: input.topic,
       difficulty: input.difficulty,
+      requestedCount: count,
       generatedCount: generated.length,
-      provider: 'ExamForge Intelligent Engine',
+      provider: 'ExamForge template engine',
+      reviewRequired: true,
     },
   };
 }
@@ -1339,17 +1331,6 @@ export async function analyzeResult(attemptId: string, viewer: { id: string; rol
   if (viewer.role === 'STUDENT' && attempt.studentId !== viewer.id) throw new AppError(403, 'Not authorized');
   if (viewer.role === 'TEACHER' && attempt.test.createdById !== viewer.id) throw new AppError(403, 'Not authorized');
 
-  // External call if available
-  if (env.OPENAI_API_KEY) {
-    try {
-      const resp = await AI.post('/analyze-result', { attempt });
-      if (resp.data) return resp.data;
-    } catch {
-      // Fallback to built-in diagnostic
-    }
-  }
-
-  // Built-in intelligent diagnostic
   const total = attempt.answers.length;
   const correct = attempt.answers.filter((a) => a.isCorrect === true).length;
   const missed = attempt.answers.filter((a) => a.isCorrect === false);
@@ -1358,6 +1339,29 @@ export async function analyzeResult(attemptId: string, viewer: { id: string; rol
   const weakTopics = missed
     .map((m) => m.question.topic || 'General Concepts')
     .filter((v, i, a) => a.indexOf(v) === i);
+
+  const graded = attempt.answers.filter((a) => a.isCorrect !== null);
+  const byTopic = new Map<string, { correct: number; total: number }>();
+  for (const a of graded) {
+    const topic = a.question.topic || 'General';
+    const t = byTopic.get(topic) ?? { correct: 0, total: 0 };
+    t.total += 1;
+    if (a.isCorrect) t.correct += 1;
+    byTopic.set(topic, t);
+  }
+  const percentage = attempt.percentage != null ? Number(attempt.percentage) : accuracy;
+  const advice = await adviseOnAttempt({
+    testTitle: attempt.test.title,
+    percentage,
+    passed: attempt.passed ?? accuracy >= 50,
+    topics: [...byTopic].map(([topic, t]) => ({ topic, ...t })),
+    missed: missed.map((m) => ({
+      question: m.question.text,
+      topic: m.question.topic || 'General',
+      studentAnswer: m.option?.text ?? (typeof m.answerJson === 'string' ? m.answerJson : null),
+      explanation: m.question.explanation ?? null,
+    })),
+  });
 
   return {
     summary: {
@@ -1371,6 +1375,20 @@ export async function analyzeResult(attemptId: string, viewer: { id: string; rol
       timeSpentMinutes: attempt.timeTakenSeconds ? Math.round(attempt.timeTakenSeconds / 60) : 0,
       suspicionScore: attempt.suspicionScore || 0,
     },
+    ...(advice ?? ruleBasedAdvice(accuracy, weakTopics)),
+    topicBreakdown: [...byTopic].map(([topic, t]) => ({
+      topic,
+      correct: t.correct,
+      total: t.total,
+      accuracy: Math.round((t.correct / t.total) * 100),
+    })),
+    generatedBy: advice ? 'model' : 'rules',
+    integrityStatus: attempt.suspicionScore > 30 ? 'Flags detected during examination session.' : 'No significant anti-cheat flags recorded.',
+  };
+}
+
+function ruleBasedAdvice(accuracy: number, weakTopics: string[]) {
+  return {
     strengths: [
       accuracy >= 70 ? 'Demonstrated strong core subject comprehension.' : 'Completed all sections within the allotted time.',
       'Accurate execution on standard assessment question formats.',
@@ -1380,7 +1398,6 @@ export async function analyzeResult(attemptId: string, viewer: { id: string; rol
       topic,
       action: `Review lesson materials and complete practice exercises on ${topic}.`,
     })),
-    integrityStatus: attempt.suspicionScore > 30 ? 'Flags detected during examination session.' : 'No significant anti-cheat flags recorded.',
   };
 }
 
@@ -1413,7 +1430,43 @@ export async function getRecommendations(studentId: string, viewer: { id: string
     take: 20,
   });
 
-  const dynamicRoadmapRecommendations = [
+  // The student's own weakest topics across recent graded answers.
+  const recentAnswers = await prisma.attemptAnswer.findMany({
+    where: { attempt: { studentId }, isCorrect: { not: null } },
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    select: { isCorrect: true, question: { select: { topic: true } } },
+  });
+  const topicStats = new Map<string, { correct: number; total: number }>();
+  for (const a of recentAnswers) {
+    const topic = a.question.topic;
+    if (!topic) continue;
+    const t = topicStats.get(topic) ?? { correct: 0, total: 0 };
+    t.total += 1;
+    if (a.isCorrect) t.correct += 1;
+    topicStats.set(topic, t);
+  }
+  const weakTopics = [...topicStats]
+    .map(([topic, t]) => ({ topic, accuracy: Math.round((t.correct / t.total) * 100) }))
+    .filter((t) => t.accuracy < 70)
+    .sort((a, b) => a.accuracy - b.accuracy)
+    .slice(0, 5);
+
+  const modelRecommendations = await recommendStudy(
+    weakTopics,
+    student?.enrollments.map((e) => e.course.name) ?? [],
+  );
+
+  const dynamicRoadmapRecommendations = modelRecommendations
+    ? modelRecommendations.map((r) => ({ type: 'PRACTICE', title: r.title, description: r.description, data: { topic: r.topic } }))
+    : weakTopics.length > 0
+      ? weakTopics.map((t) => ({
+          type: 'PRACTICE',
+          title: `Strengthen ${t.topic}`,
+          description: `Your recent accuracy on ${t.topic} is ${t.accuracy}%. Revisit the lesson notes and practise a few questions on it.`,
+          data: { topic: t.topic },
+        }))
+      : [
     {
       type: 'ROADMAP',
       title: 'Full Stack Web Development Pathway',
@@ -1426,7 +1479,7 @@ export async function getRecommendations(studentId: string, viewer: { id: string
       description: 'Practice Two Sum, Binary Search, and Array Manipulation coding challenges.',
       data: { topic: 'Algorithms' },
     },
-  ];
+        ];
 
   return {
     aiGenerated: dynamicRoadmapRecommendations,

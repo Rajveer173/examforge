@@ -47,14 +47,20 @@ export function AiAssistantPage() {
   };
 
   const send = async () => {
-    if (!input.trim()) return;
+    const content = input.trim();
+    if (!content || busy) return;
     setBusy(true);
+    setInput('');
+    // Show the question straight away; the model can take several seconds to reply.
+    setMessages((prev) => [...prev, { id: `pending-${Date.now()}`, role: 'user', content }]);
     try {
-      await api.post(`/ai/conversations/${active.id}/messages`, { content: input });
+      await api.post(`/ai/conversations/${active.id}/messages`, { content });
       const { data } = await api.get(`/ai/conversations/${active.id}`);
       setMessages(data.data.conversation.messages || []);
-      setInput('');
+      loadConversations();
     } catch (err) {
+      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('pending-')));
+      setInput(content);
       setError(err);
     } finally {
       setBusy(false);

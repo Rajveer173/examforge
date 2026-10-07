@@ -35,9 +35,16 @@ const envSchema = z.object({
     .string()
     .default('false')
     .transform((v) => v === 'true'),
-  AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
-  AI_PROVIDER: z.enum(['external', 'openai', 'gemini', 'ollama']).default('external'),
-  OPENAI_API_KEY: z.string().optional().default(''),
+  // Pretrained model behind any OpenAI-compatible API. Defaults to a local Ollama
+  // server; when it is unreachable the AI features fall back to the built-in engine.
+  LLM_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v !== 'false'),
+  LLM_BASE_URL: z.string().url().default('http://localhost:11434/v1'),
+  LLM_MODEL: z.string().min(1).default('qwen2.5:3b'),
+  LLM_API_KEY: z.string().optional().default(''),
+  LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).default(80_000),
   S3_ENDPOINT: z.string().default('http://localhost:9000'),
   S3_BUCKET: z.string().default('examforge'),
   S3_ACCESS_KEY: z.string().default(''),

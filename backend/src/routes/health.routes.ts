@@ -4,6 +4,7 @@ import { prisma } from '../config/database.js';
 import { env } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { cachePing } from '../services/cache.service.js';
+import { llmInfo } from '../services/llm.js';
 import { logger } from '../utils/logger.js';
 
 export const healthRouter = Router();
@@ -105,11 +106,12 @@ healthRouter.get(
 );
 
 healthRouter.get('/ai', (_req, res) => {
+  const info = llmInfo();
   res.json({
     success: true,
     data: {
-      status: env.OPENAI_API_KEY ? 'configured' : 'not-configured',
-      url: env.AI_SERVICE_URL,
+      status: !info.enabled ? 'disabled' : info.reachable ? 'configured' : 'unreachable',
+      model: info.model,
     },
   });
 });
