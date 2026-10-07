@@ -511,3 +511,98 @@ export async function recommendStudy(weakTopics: { topic: string; accuracy: numb
   );
   return out?.items?.length ? out.items : null;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Intent routing                                                             */
+/* -------------------------------------------------------------------------- */
+
+export type Intent =
+  | 'greeting'
+  | 'general'
+  | 'restricted'
+  | 'placements'
+  | 'my_results'
+  | 'student_records'
+  | 'answers'
+  | 'results'
+  | 'proctoring'
+  | 'generate_questions'
+  | 'users'
+  | 'audit';
+
+const INTENTS: Record<string, Partial<Record<Intent, string>>> = {
+  STUDENT: {
+    placements: 'asks about placement drives, companies hiring, their own placement eligibility, profile or applications',
+    my_results: 'asks about their own test results, scores, mistakes, weak areas or what to study based on their tests',
+    restricted: "asks for another student's data, or for teacher, admin or staff records, audit logs, passwords, credentials or system internals",
+    greeting: 'only a greeting or "what can you do"',
+    general: 'anything else: explaining concepts, coding help, study plans, general questions (including general questions about how placements or exams work)',
+  },
+  TEACHER: {
+    placements: 'asks for placement drive records, applicant numbers or placement statistics',
+    student_records: 'asks to list students or look up a specific student (profile, CGPA, tests, applications)',
+    answers: 'asks what students answered on specific questions, or a per-question breakdown',
+    results: 'asks for test results, scores, pass rates, averages or class performance',
+    proctoring: 'asks about proctoring sessions, cheating, suspicion scores or violations',
+    generate_questions: 'asks to write or draft new exam questions or a quiz',
+    restricted: 'asks about admin or other staff accounts, audit logs, passwords, credentials or system configuration',
+    greeting: 'only a greeting or "what can you do"',
+    general: 'anything else: explaining topics, teaching help, lesson planning, general questions',
+  },
+  ADMIN: {
+    placements: 'asks for placement drive records, applicant numbers or placement statistics',
+    student_records: 'asks to list students or look up a specific student (profile, CGPA, tests, applications)',
+    answers: 'asks what students answered on specific questions, or a per-question breakdown',
+    results: 'asks for test results, scores, pass rates, averages or class performance',
+    proctoring: 'asks about proctoring sessions, cheating, suspicion scores or violations',
+    generate_questions: 'asks to write or draft new exam questions or a quiz',
+    users: 'asks about user accounts: how many users, teachers, admins, the staff directory, recent sign-ups',
+    audit: 'asks about audit logs, recent platform activity, or who did what',
+    greeting: 'only a greeting or "what can you do"',
+    general: 'anything else: explanations, teaching help, general questions',
+  },
+};
+
+/**
+ * Picks which handler answers a message. The model only chooses among the
+ * intents allowed for the user's role, so a misclassification can never reach
+ * data outside that role; the keyword guess is used when the model is offline.
+ */
+export async function classifyIntent(
+  query: string,
+  history: ChatMessage[],
+  role: string,
+  keywordGuess: Intent,
+): Promise<Intent> {
+  const options = INTENTS[role === 'ORG_ADMIN' ? 'ADMIN' : role] ?? INTENTS.STUDENT;
+  const allowed = Object.keys(options) as Intent[];
+  const fallback = allowed.includes(keywordGuess) ? keywordGuess : 'general';
+  if (!llmEnabled()) return fallback;
+
+  const previous = history.filter((m) => m.role === 'user').slice(-3, -1).map((m) => `- ${m.content.slice(0, 200)}`);
+  const out = await chatJson<{ intent: Intent }>(
+    [
+      {
+        role: 'system',
+        content: `Classify the user's latest message for a university exam platform assistant. The user is a ${role}. Choose exactly one intent:\n${allowed
+          .map((k) => `- ${k}: ${options[k]}`)
+          .join('\n')}`,
+      },
+      {
+        role: 'user',
+        content: `${previous.length ? `Earlier messages:\n${previous.join('\n')}\n\n` : ''}Latest message: ${query.slice(0, 500)}`,
+      },
+    ],
+    {
+      name: 'intent',
+      schema: {
+        type: 'object',
+        properties: { intent: { type: 'string', enum: allowed } },
+        required: ['intent'],
+        additionalProperties: false,
+      },
+    },
+    { temperature: 0, maxTokens: 20 },
+  );
+  return out && allowed.includes(out.intent) ? out.intent : fallback;
+}

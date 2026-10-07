@@ -1,7 +1,7 @@
 import { prisma } from '../config/database.js';
 import { AppError } from '../utils/errors.js';
 import type { ChatMessage } from './llm.js';
-import { adviseOnAttempt, generateQuestionsWithModel, recommendStudy, tutorReply } from './ai.model.js';
+import { adviseOnAttempt, classifyIntent, generateQuestionsWithModel, recommendStudy, tutorReply, type Intent } from './ai.model.js';
 
 export async function createConversation(userId: string, input: { title?: string; topic?: string; courseId?: string }) {
   return prisma.aIConversation.create({
@@ -45,6 +45,29 @@ interface UserContext {
   role: string;
 }
 
+const has = (q: string, words: string[]) => words.some((w) => q.includes(w));
+
+/** Keyword routing: the fallback when the model is offline, and a hint for it. */
+function keywordIntent(q: string, role: string): Intent {
+  if (isGreeting(q)) return 'greeting';
+  if (role === 'STUDENT') {
+    if (has(q, ['admin', 'teacher', 'instructor', 'faculty', 'staff', 'other student', 'all students', 'audit log', 'password', 'secret', 'credential', 'token', 'system info'])) return 'restricted';
+    if (has(q, ['placement', 'eligible', 'eligibility', 'drive', 'hiring', 'on campus', 'off campus', 'company', 'my application'])) return 'placements';
+    if (has(q, ['my result', 'my score', 'how did i do', 'my performance', 'what should i study', 'weak', 'mistake', 'my test'])) return 'my_results';
+    return 'general';
+  }
+  if (has(q, ['audit', 'activity log', 'who did'])) return 'audit';
+  if (has(q, ['user account', 'all users', 'list users', 'how many users', 'teachers', 'admins', 'staff list'])) return 'users';
+  if (has(q, ['password', 'credential', 'secret', 'token'])) return 'restricted';
+  if (has(q, ['placement', 'drive', 'hiring', 'applicant', 'placed'])) return 'placements';
+  if (has(q, ['proctor', 'cheat', 'suspicion', 'violation'])) return 'proctoring';
+  if (has(q, ['answer', 'what did', 'student response', 'submission', 'question breakdown', 'per question'])) return 'answers';
+  if (has(q, ['result', 'performance', 'score', 'pass rate', 'fail', 'average', 'highest', 'lowest'])) return 'results';
+  if (has(q, ['student record', 'dossier', 'profile of', 'records for', 'lookup', 'search student', 'student'])) return 'student_records';
+  if (has(q, ['generate', 'create question', 'mcq', 'quiz'])) return 'generate_questions';
+  return 'general';
+}
+
 /** Short openers like "hi" or "what can you do" get the capabilities menu. */
 function isGreeting(query: string) {
   const q = query.trim().toLowerCase().replace(/[!?.]+$/, '');
@@ -60,16 +83,12 @@ function isGreeting(query: string) {
  */
 async function handleStaffQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
   const q = query.toLowerCase();
+  const intent = await classifyIntent(query, history, user.role, keywordIntent(q, user.role));
+  // Teachers see results, answers and proctoring for their own tests; admins see all.
+  const ownTests = user.role === 'TEACHER' ? { createdById: user.id } : {};
 
   // 1. Placement Drives & Placement Cell Management (Admin / Teacher)
-  if (
-    q.includes('placement') ||
-    q.includes('drive') ||
-    q.includes('hiring') ||
-    q.includes('applicant') ||
-    q.includes('pod') ||
-    q.includes('placed')
-  ) {
+  if (intent === 'placements') {
     const drives = await prisma.placementDrive.findMany({
       include: {
         applications: {
@@ -113,15 +132,7 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
   }
 
   // 2. Student Records & Dossier Lookup (Admin / Teacher)
-  if (
-    q.includes('student record') ||
-    q.includes('dossier') ||
-    q.includes('profile of') ||
-    q.includes('records for') ||
-    q.includes('lookup') ||
-    q.includes('search student') ||
-    (q.includes('student') && !q.includes('answer') && !q.includes('response'))
-  ) {
+  if (intent === 'student_records') {
     const students = await prisma.user.findMany({
       where: { role: 'STUDENT' },
       include: {
@@ -221,15 +232,9 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
   }
 
   // 3. All Answers / Question-level analysis
-  if (
-    q.includes('answer') ||
-    q.includes('what did') ||
-    q.includes('student response') ||
-    q.includes('submission') ||
-    q.includes('question breakdown') ||
-    q.includes('per question')
-  ) {
+  if (intent === 'answers') {
     const tests = await prisma.test.findMany({
+      where: ownTests,
       include: {
         testQuestions: {
           include: {
@@ -313,19 +318,9 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
   }
 
   // 2. Test Results & Overall Performance
-  if (
-    q.includes('result') ||
-    q.includes('performance') ||
-    q.includes('score') ||
-    q.includes('pass') ||
-    q.includes('fail') ||
-    q.includes('average') ||
-    q.includes('stat') ||
-    q.includes('highest') ||
-    q.includes('lowest') ||
-    q.includes('overview')
-  ) {
+  if (intent === 'results') {
     const attempts = await prisma.attempt.findMany({
+      where: { test: ownTests },
       include: {
         test: true,
         student: true,
@@ -335,6 +330,7 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
     });
 
     const tests = await prisma.test.findMany({
+      where: ownTests,
       include: {
         _count: { select: { attempts: true } },
       },
@@ -391,13 +387,15 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
   }
 
   // 3. Question Generation / Curriculum Creation
-  if (q.includes('generate') || q.includes('create question') || q.includes('mcq') || q.includes('quiz')) {
+  if (intent === 'generate_questions') {
     return (await tutorReply(user, history, topic)) ?? generateSmartQuestionSet(query);
   }
 
   // 4. Proctoring & Anti-Cheat Summary
-  if (q.includes('proctor') || q.includes('cheat') || q.includes('suspicion') || q.includes('violation')) {
+  if (intent === 'proctoring') {
     const sessions = await prisma.proctoringSession.findMany({
+      where: user.role === 'TEACHER' ? { test: { createdById: user.id } } : {},
+      orderBy: { suspicionScore: 'desc' },
       include: {
         student: true,
         test: true,
@@ -425,165 +423,45 @@ async function handleStaffQuery(query: string, user: UserContext, history: ChatM
     return response;
   }
 
-  // 5. Student Records & Dossier Lookup (Admin / Teacher)
-  if (
-    q.includes('student') ||
-    q.includes('record') ||
-    q.includes('profile') ||
-    q.includes('dossier') ||
-    q.includes('who is') ||
-    q.includes('lookup') ||
-    q.includes('search student')
-  ) {
-    const students = await prisma.user.findMany({
-      where: { role: 'STUDENT' },
-      include: {
-        placementProfile: true,
-        attempts: {
-          include: { test: true },
-          orderBy: { startedAt: 'desc' },
-        },
-        placementApplications: {
-          include: { drive: true },
-          orderBy: { appliedAt: 'desc' },
-        },
-      },
+  // Staff boundary: teachers work with student data, not platform accounts or logs.
+  if (intent === 'restricted' || (user.role === 'TEACHER' && (intent === 'users' || intent === 'audit'))) {
+    return `🔒 **Access Restricted**\n\nAs a **${user.role}** you can view student records, results, answers and proctoring for your own tests, and placements. Administrator and staff accounts, audit logs, credentials and system settings are only available to administrators.`;
+  }
+
+  // 8. User directory (Admin)
+  if (intent === 'users') {
+    const [byRole, recent] = await Promise.all([
+      prisma.user.groupBy({ by: ['role'], _count: { _all: true } }),
+      prisma.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 15,
+        select: { fullName: true, username: true, email: true, role: true, isActive: true, createdAt: true },
+      }),
+    ]);
+    let res = `### 👥 Platform Users\n\n| Role | Accounts |\n| :--- | :---: |\n`;
+    for (const r of byRole) res += `| ${r.role} | **${r._count._all}** |\n`;
+    res += `\n#### Most recent accounts\n\n| Name | Email | Role | Status | Joined |\n| :--- | :--- | :---: | :---: | :---: |\n`;
+    for (const u of recent) {
+      res += `| ${u.fullName || u.username} | \`${u.email}\` | ${u.role} | ${u.isActive ? 'Active' : 'Inactive'} | ${new Date(u.createdAt).toLocaleDateString()} |\n`;
+    }
+    return res;
+  }
+
+  // 9. Audit trail (Admin)
+  if (intent === 'audit') {
+    const logs = await prisma.auditLog.findMany({
+      orderBy: { createdAt: 'desc' },
       take: 20,
+      include: { user: { select: { fullName: true, username: true, role: true } } },
     });
-
-    if (students.length === 0) {
-      return `### 👥 Student Records & Dossiers\n\nNo student accounts have been created in the system yet.`;
+    if (logs.length === 0) return `### 🧾 Audit Log\n\nNo audit events have been recorded yet.`;
+    let res = `### 🧾 Audit Log: latest ${logs.length} events\n\n| When | User | Action | Entity |\n| :--- | :--- | :--- | :--- |\n`;
+    for (const l of logs) {
+      const who = l.user ? `${l.user.fullName || l.user.username} (${l.user.role})` : 'System';
+      res += `| ${new Date(l.createdAt).toLocaleString()} | ${who} | \`${l.action}\` | ${l.entity}${l.entityId ? ` \`${l.entityId.slice(0, 8)}\`` : ''} |\n`;
     }
-
-    // Check if query targets a specific student
-    const matched = students.find((s) => {
-      const name = (s.fullName || s.username).toLowerCase();
-      const email = s.email.toLowerCase();
-      return q.includes(name) || q.includes(email) || (s.username && q.includes(s.username.toLowerCase()));
-    });
-
-    if (matched) {
-      const p = matched.placementProfile;
-      const totalAttempts = matched.attempts.length;
-      const evaluated = matched.attempts.filter((a) => a.status === 'EVALUATED');
-      const passed = evaluated.filter((a) => a.passed === true);
-      const avgScore = evaluated.length > 0
-        ? Math.round(evaluated.reduce((acc, a) => acc + Number(a.percentage || 0), 0) / evaluated.length)
-        : 0;
-
-      let res = `### 👤 Student Dossier: **${matched.fullName || matched.username}**\n\n`;
-      res += `- **Email**: \`${matched.email}\` | **Username**: \`${matched.username}\` | **Status**: ${matched.isActive ? 'Active' : 'Inactive'}\n`;
-      res += `- **Joined**: ${new Date(matched.createdAt).toLocaleDateString()}\n\n`;
-
-      res += `#### 💼 Placement Profile (POD)\n`;
-      if (p) {
-        res += `- **Branch**: ${p.branch || 'N/A'} | **CGPA**: **${p.cgpa}**\n`;
-        res += `- **Roll Number**: ${p.rollNumber || 'N/A'} | **Phone**: ${p.phone || 'N/A'}\n`;
-        res += `- **Skills**: ${Array.isArray(p.skills) ? (p.skills as string[]).join(', ') : 'None listed'}\n`;
-        if (p.resumeUrl) res += `- **Resume**: [Link](${p.resumeUrl})\n`;
-        if (p.githubUrl) res += `- **GitHub**: [Link](${p.githubUrl})\n`;
-        if (p.linkedinUrl) res += `- **LinkedIn**: [Link](${p.linkedinUrl})\n`;
-      } else {
-        res += `_Placement profile not registered yet._\n`;
-      }
-
-      res += `\n#### 📊 Academic Performance\n`;
-      res += `- **Total Tests Taken**: ${totalAttempts} | **Passed**: ${passed.length} | **Average Score**: **${avgScore}%**\n\n`;
-      if (matched.attempts.length > 0) {
-        res += `| Test | Score | Percentage | Status | Date |\n`;
-        res += `| :--- | :---: | :---: | :---: | :---: |\n`;
-        for (const att of matched.attempts.slice(0, 5)) {
-          const passBadge = att.passed === true ? '✅ Pass' : att.passed === false ? '❌ Fail' : '⏳ In Progress';
-          res += `| ${att.test.title} | ${att.score ?? '-'}/${att.test.totalMarks} | ${att.percentage ?? '-'}% | ${passBadge} | ${new Date(att.startedAt).toLocaleDateString()} |\n`;
-        }
-      }
-
-      if (matched.placementApplications.length > 0) {
-        res += `\n#### 🏢 Placement Applications\n`;
-        res += `| Company | Role | Application Status | Applied On |\n`;
-        res += `| :--- | :--- | :---: | :---: |\n`;
-        for (const app of matched.placementApplications) {
-          res += `| ${app.drive.companyName} | ${app.drive.role} | **${app.status}** | ${new Date(app.appliedAt).toLocaleDateString()} |\n`;
-        }
-      }
-
-      return res;
-    }
-
-    // General list of students
-    let res = `### 👥 Student Directory & Academic Overview\n\n`;
-    res += `Total Registered Students: **${students.length}**\n\n`;
-    res += `| Student Name | Email | Tests Taken | Avg Score | CGPA | POD Status |\n`;
-    res += `| :--- | :--- | :---: | :---: | :---: | :---: |\n`;
-
-    for (const s of students) {
-      const name = s.fullName || s.username;
-      const attCount = s.attempts.length;
-      const evaluated = s.attempts.filter((a) => a.status === 'EVALUATED');
-      const avg = evaluated.length > 0
-        ? `${Math.round(evaluated.reduce((acc, a) => acc + Number(a.percentage || 0), 0) / evaluated.length)}%`
-        : '-';
-      const cgpa = s.placementProfile ? `${s.placementProfile.cgpa}` : '-';
-      const podStatus = s.placementProfile ? '✅ Registered' : '⚠️ Missing';
-
-      res += `| **${name}** | \`${s.email}\` | ${attCount} | ${avg} | ${cgpa} | ${podStatus} |\n`;
-    }
-
-    res += `\n> 💡 **Tip**: Ask _"Show records for [Student Name]"_ or _"Show profile of student@example.com"_ to view full individual dossiers, test breakdown, and placement applications.`;
     return res;
   }
-
-  // 6. Placement Drives & Placement Cell Management (Admin / Teacher)
-  if (
-    q.includes('placement') ||
-    q.includes('drive') ||
-    q.includes('hiring') ||
-    q.includes('applicant') ||
-    q.includes('pod') ||
-    q.includes('placed')
-  ) {
-    const drives = await prisma.placementDrive.findMany({
-      include: {
-        applications: {
-          include: {
-            student: { select: { fullName: true, username: true, email: true } },
-          },
-        },
-      },
-      orderBy: { deadline: 'desc' },
-    });
-
-    const registeredProfilesCount = await prisma.placementProfile.count();
-    const totalApplicationsCount = await prisma.placementApplication.count();
-    const placedStudents = await prisma.placementApplication.count({
-      where: { status: 'SELECTED' },
-    });
-
-    let res = `### 🏢 Campus Placement Cell Management\n\n`;
-    res += `| Metric | Platform Value |\n`;
-    res += `| :--- | :--- |\n`;
-    res += `| **Registered Students (POD)** | ${registeredProfilesCount} |\n`;
-    res += `| **Total Drives Hosted** | ${drives.length} |\n`;
-    res += `| **Total Applications** | ${totalApplicationsCount} |\n`;
-    res += `| **Selected / Placed Students** | **${placedStudents}** |\n\n`;
-
-    if (drives.length === 0) {
-      res += `_No placement drives created yet. You can create new on-campus or off-campus drives from the Placements dashboard._`;
-      return res;
-    }
-
-    res += `#### 📋 Placement Drives Status\n\n`;
-    res += `| Company | Role | Type | Status | Min CGPA | Package | Applicants |\n`;
-    res += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
-
-    for (const d of drives) {
-      const ctc = d.ctcLpa ? `${d.ctcLpa} LPA` : '-';
-      res += `| **${d.companyName}** | ${d.role} | ${d.driveType} | \`${d.status}\` | ${d.eligibilityCgpa || 'Open'} | ${ctc} | **${d.applications.length}** |\n`;
-    }
-
-    return res;
-  }
-
   if (!isGreeting(query)) {
     const reply = await tutorReply(user, history, topic);
     if (reply) return reply;
@@ -614,6 +492,7 @@ What would you like to review today?`;
  */
 async function handleStudentQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
   const q = query.toLowerCase();
+  const intent = await classifyIntent(query, history, user.role, keywordIntent(q, user.role));
 
   // 0. Security Isolation - Block student access to admin, teacher, staff, other students, system internals
   const restrictedKeywords = [
@@ -627,22 +506,12 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
     return regex.test(q);
   });
 
-  if (mentionsRestricted) {
+  if (intent === 'restricted' || (mentionsRestricted && intent !== 'general' && intent !== 'greeting')) {
     return `🔒 **Access Restricted**\n\nAs a **Student**, you do not have permission to access Administrator, Teacher, or Faculty records, staff credentials, system audit logs, or records belonging to other students.\n\nIf you need assistance with your personal coursework, test diagnostics, roadmaps, or placement eligibility, feel free to ask!`;
   }
 
   // 1. Placement & Campus Hiring Queries (Student)
-  if (
-    q.includes('placement') ||
-    q.includes('eligible') ||
-    q.includes('eligibility') ||
-    q.includes('drive') ||
-    q.includes('hiring') ||
-    q.includes('on campus') ||
-    q.includes('off campus') ||
-    q.includes('company') ||
-    q.includes('pod')
-  ) {
+  if (intent === 'placements') {
     const profile = await prisma.placementProfile.findUnique({
       where: { userId: user.id },
     });
@@ -701,8 +570,15 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
     return res;
   }
 
+  // Open-ended questions go to the model; the keyword templates below only answer
+  // when it is offline.
+  if (intent === 'general') {
+    const reply = await tutorReply(user, history, topic);
+    if (reply) return reply;
+  }
+
   // 2. Learning Roadmaps
-  if (
+  if (intent === 'general' && (
     q.includes('roadmap') ||
     q.includes('study plan') ||
     q.includes('how to learn') ||
@@ -711,21 +587,12 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
     q.includes('guide') ||
     q.includes('step by step') ||
     q.includes('where to start')
-  ) {
+  )) {
     return (await tutorReply(user, history, topic)) ?? generateRoadmap(query);
   }
 
   // 2. Personal Test Performance & Diagnostic
-  if (
-    q.includes('my result') ||
-    q.includes('my score') ||
-    q.includes('how did i do') ||
-    q.includes('my performance') ||
-    q.includes('what should i study') ||
-    q.includes('weak') ||
-    q.includes('mistake') ||
-    q.includes('improve')
-  ) {
+  if (intent === 'my_results') {
     const studentAttempts = await prisma.attempt.findMany({
       where: { studentId: user.id, status: { in: ['SUBMITTED', 'EVALUATED'] } },
       include: {
@@ -796,12 +663,12 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
   }
 
   // 3. Coding Problem / Hint Request
-  if (q.includes('two sum') || q.includes('reverse string') || q.includes('binary search') || q.includes('code problem') || q.includes('algorithm')) {
+  if (intent === 'general' && (q.includes('two sum') || q.includes('reverse string') || q.includes('binary search') || q.includes('code problem') || q.includes('algorithm'))) {
     return (await tutorReply(user, history, topic)) ?? generateCodingTutorHelp(query);
   }
 
   // 4. Programming Concept Explanation
-  if (
+  if (intent === 'general' && (
     q.includes('explain') ||
     q.includes('what is') ||
     q.includes('difference between') ||
@@ -812,13 +679,8 @@ async function handleStudentQuery(query: string, user: UserContext, history: Cha
     q.includes('javascript') ||
     q.includes('python') ||
     q.includes('sql')
-  ) {
+  )) {
     return (await tutorReply(user, history, topic)) ?? generateConceptExplanation(query);
-  }
-
-  if (!isGreeting(query)) {
-    const reply = await tutorReply(user, history, topic);
-    if (reply) return reply;
   }
 
   // 5. Default Student Assistant Greeting (greetings, or when the model is offline)
