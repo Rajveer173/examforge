@@ -58,36 +58,36 @@ export default {
         info: { DEFAULT: token('info'), soft: token('info-soft'), ink: token('info-ink') },
       },
       fontFamily: {
-        // Bricolage Grotesque carries the display voice — optically tight and
-        // characterful at size — over Plus Jakarta Sans for the interface and
-        // JetBrains Mono for anything that is a figure or a label.
+        // Apple's system faces where they exist (SF Pro on macOS / iOS), Inter
+        // everywhere else: it was drawn to the same metrics and reads the same.
         sans: [
-          'Plus Jakarta Sans',
-          'ui-sans-serif',
-          'system-ui',
           '-apple-system',
           'BlinkMacSystemFont',
+          'SF Pro Text',
+          'Inter',
+          'ui-sans-serif',
+          'system-ui',
           'Segoe UI',
-          'Roboto',
           'Helvetica Neue',
           'Arial',
           'sans-serif',
         ],
         display: [
-          'Bricolage Grotesque',
-          'Plus Jakarta Sans',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'SF Pro Display',
+          'Inter',
           'ui-sans-serif',
           'system-ui',
-          'Segoe UI',
           'sans-serif',
         ],
         mono: [
-          'JetBrains Mono',
+          'SF Mono',
           'ui-monospace',
+          'JetBrains Mono',
           'SFMono-Regular',
           'Menlo',
           'Consolas',
-          'Liberation Mono',
           'monospace',
         ],
       },
@@ -122,8 +122,8 @@ export default {
           '0 4px 12px -4px rgb(var(--shadow) / 0.16), 0 24px 60px -16px rgb(var(--shadow) / 0.32)',
         // Accent bloom. Reserved for the primary action and the active dock
         // item — the two things per screen that should attract the eye.
-        glow: '0 1px 2px 0 rgb(var(--accent-glow) / 0.24), 0 6px 20px -6px rgb(var(--accent-glow) / 0.45)',
-        'glow-lg': '0 2px 4px 0 rgb(var(--accent-glow) / 0.28), 0 10px 30px -6px rgb(var(--accent-glow) / 0.55)',
+        glow: '0 1px 2px 0 rgb(var(--shadow) / 0.12), 0 4px 12px -6px rgb(var(--accent-glow) / 0.35)',
+        'glow-lg': '0 1px 2px 0 rgb(var(--shadow) / 0.14), 0 8px 20px -8px rgb(var(--accent-glow) / 0.45)',
       },
       maxWidth: {
         prose: '68ch',

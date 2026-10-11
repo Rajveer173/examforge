@@ -26,11 +26,14 @@ const VIEWPORT_GUTTER = 12;
 /** Shared geometry for every control in the dock, labelled or not. */
 function dockButtonClass(active, showLabels) {
   return cx(
-    'group relative flex shrink-0 items-center justify-center rounded-full text-ink-muted',
-    'transition-[background-color,color,box-shadow,transform] duration-150',
-    'hover:-translate-y-0.5 hover:bg-accent-soft hover:text-accent-ink',
+    'group relative flex shrink-0 items-center justify-center rounded-full',
+    'transition-[background-color,color,box-shadow,transform] duration-150 hover:-translate-y-0.5',
     showLabels ? 'h-auto w-[4.25rem] flex-col gap-1 px-1 py-1.5' : 'h-10 w-10 lg:h-11 lg:w-11',
-    active && 'bg-accent text-accent-on shadow-glow hover:bg-accent-hover hover:text-accent-on',
+    // Colour classes are exclusive: Tailwind orders utilities by its own sheet,
+    // not by the class string, so a resting colour would beat the active one.
+    active
+      ? 'bg-accent text-accent-on shadow-glow hover:bg-accent-hover'
+      : 'text-ink-muted hover:bg-ink/[0.08] hover:text-ink',
   );
 }
 

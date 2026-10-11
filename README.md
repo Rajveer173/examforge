@@ -4,13 +4,14 @@ Full-stack learning management, assessment, and examination platform built with 
 
 ## What it does
 
-ExamForge handles the full cycle of online education — course management, question banks, timed exams with anti-cheat, auto-grading, assignments, certifications, and a role-based dashboard for admins, teachers, students, and proctors.
+ExamForge handles the full cycle of online education — course management, question banks, timed exams with anti-cheat, auto-grading, assignments, certifications, a campus placement portal, an AI assistant that answers from live platform data, and a role-based dashboard for admins, teachers, students, and proctors.
 
 **Stack:**
 
 | Layer | Tech |
 |-------|------|
 | Frontend | React 18, Vite, Tailwind CSS, Zustand, React Hook Form, Zod |
+| AI | Any OpenAI-compatible LLM API (OpenRouter by default) |
 | Backend | Node.js, Express, TypeScript, Prisma ORM, JWT |
 | Database | MySQL 8.4 |
 | DevOps | Docker Compose, Nginx reverse proxy |
@@ -69,9 +70,9 @@ Public registration creates `STUDENT` accounts only. Teacher and administrator a
 
 | Role | Main responsibility | Capabilities |
 |------|---------------------|--------------|
-| Admin | Platform owner | Create staff and student accounts, manage access, and review users, tests, assignments, results, and audit activity |
-| Teacher | Course owner | Build courses, quizzes, coding assessments, and assignments; assign work; grade responses; review results and proctoring flags |
-| Student | Learner | Register, join courses, take quizzes, submit assignments and code, and review feedback, results, certificates, and progress |
+| Admin | Platform owner | Create staff and student accounts, manage access, run placement drives, and review users, tests, assignments, results, and audit activity |
+| Teacher | Course owner and placement coordinator | Build courses, quizzes, coding assessments, and assignments; assign work; grade responses; review results and proctoring flags; create placement drives and review applicants |
+| Student | Learner | Register, join courses, take quizzes, submit assignments and code, apply to placement drives they are eligible for, and review feedback, results, certificates, and progress |
 
 ## Environment variables
 
@@ -98,12 +99,13 @@ JWT_REFRESH_EXPIRES_IN=7d
 # Redis (optional for dev, required for BullMQ job queue)
 REDIS_URL=redis://localhost:6379
 
-# AI: a pretrained model behind any OpenAI-compatible API. The default is a local
-# Ollama server (`ollama pull qwen2.5:3b`); point these at a hosted provider to use a
-# larger model. If the model is unreachable the built-in engine answers instead.
+# AI: an LLM behind any OpenAI-compatible API, OpenRouter by default (get a key at
+# https://openrouter.ai/keys). Any OpenRouter model id works; a local Ollama server
+# (http://localhost:11434/v1) also does. If the model is unreachable or rate limited
+# the built-in engine answers instead.
 LLM_ENABLED=true
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen2.5:3b
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 LLM_API_KEY=
 
 # S3 / MinIO (optional for dev)
@@ -152,6 +154,7 @@ examforge/
 │   │       ├── coding/     Problem list, solve page
 │   │       ├── proctoring/ Proctor dashboard
 │   │       ├── ai/         AI assistant page
+│   │       ├── placement/  Student placement portal, admin/teacher drive management
 │   │       └── search/     Global search results
 │   ├── index.html
 │   ├── vite.config.js
@@ -288,6 +291,31 @@ examforge/
 - Tenant-isolated data at service level
 - Organization admin role
 
+### Campus Placements
+
+- Placement drives (on-campus / off-campus) with company, role, CTC, location, deadline and drive date
+- Eligibility rules per drive: minimum CGPA, eligible branches, max active backlogs, minimum 10th / 12th %, batch year
+- **Admins and teachers** create, edit and close drives and move applicants through Applied → Shortlisted → Interviewed → Selected / Rejected
+- Students keep a placement profile (branch, CGPA, backlogs, graduation year, resume, GitHub, LinkedIn), see only drives they qualify for, and apply or withdraw
+- Placement statistics: drives by status, applications, students placed
+
+### AI Assistant
+
+- Works with any OpenAI-compatible API; OpenRouter is the default (`LLM_*` settings below), a local Ollama server also works
+- **Answers from live data, scoped by role.** Every question reads the database at that moment:
+  - Students: pending and upcoming tests, assignments and deadlines, coding problems left (by difficulty), question types in upcoming tests, own results and weak topics, placement eligibility
+  - Admins: accounts by role, students, graduates by year, students per branch and batch, courses, tests, pass rate, question bank by type, coding, assignments awaiting grading, placements
+  - Teachers: the same statistics for the content they created, plus student and placement totals
+- Students only ever see their own records; the access rules are enforced in code, not left to the model
+- Generates exam questions (MCQ, multi-select, true/false, coding) and re-solves each one to verify the answer key
+- Falls back to a built-in engine with plain tables when the model is offline or rate limited
+
+### Design
+
+- "Glass" design language modelled on Apple platform materials: translucent, blurred panes over a soft wallpaper, Apple system colours (system blue accent, graphite greys in dark mode), SF Pro / Inter typography
+- Full light and dark themes driven by CSS tokens, following the OS setting by default
+- Comfortable and compact density modes
+
 ### Other
 
 - File upload with S3/MinIO or local storage
@@ -352,7 +380,7 @@ The seeder (`npm run seed`) creates:
 
 ## Completion status
 
-The core LMS, role, quiz, assignment, grading, coding, activity, and light-themed UI workflows are implemented and seeded for local demonstration. The optional infrastructure below remains separate from the core app.
+The core LMS, role, quiz, assignment, grading, coding, placement, AI assistant, and themed UI workflows are implemented and seeded for local demonstration. The optional infrastructure below remains separate from the core app.
 
 ## Roadmap
 
@@ -377,17 +405,20 @@ The core LMS, role, quiz, assignment, grading, coding, activity, and light-theme
 - [x] Certificates & leaderboards
 - [x] Search
 - [x] File uploads
-- [x] AI assistant page (frontend, backend stubs)
+- [x] AI assistant with live, role-scoped data answers (OpenRouter)
+- [x] AI question generation with answer-key verification
+- [x] Campus placement portal (admin/teacher drive management, student eligibility and applications)
+- [x] Glass design system with light and dark themes
 - [x] Email verification, forgot/reset password (backend)
 
 **Planned:**
 
-- [ ] Python AI microservice (FastAPI, RAG tutor, question generation, recommendations)
+- [ ] RAG tutor over course material
 - [ ] Docker-in-Docker code execution sandbox
 - [ ] Redis job queue (BullMQ) for email, analytics, cleanup
 - [ ] Prometheus + Grafana monitoring stack
-- [ ] Frontend: charts (Recharts), skeleton loaders, deeper mobile polish
-- [ ] Unit tests (Vitest), integration tests, E2E (Playwright)
+- [ ] Deeper mobile polish
+- [ ] Frontend unit tests and E2E (Playwright)
 - [ ] GitHub Actions CI/CD pipeline
 - [ ] Documentation site
 

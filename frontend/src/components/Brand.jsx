@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Link } from 'react-router-dom';
 import { cx } from './ui.jsx';
 
@@ -6,7 +7,7 @@ import { cx } from './ui.jsx';
  *
  * The mark is drawn rather than set in type so it holds its proportions from
  * 20px in the dock to 40px on the auth slab. The gradient runs from a lighter
- * iris to the accent, which is what keeps a 24px rounded square from reading as
+ * tint of the accent to the accent, which is what keeps a 24px rounded square from reading as
  * a flat coloured chip next to real glass.
  *
  * `tone="panel"` is for the always-dark slab, where the surrounding ink is
@@ -21,9 +22,10 @@ const SIZES = {
 
 export function BrandMark({ size = 'md', className }) {
   const spec = SIZES[size] ?? SIZES.md;
-  // The gradient id must be unique per instance or a second mark on the page
-  // reuses the first one's stops after a hot reload.
-  const id = `ef-mark-${size}`;
+  // The gradient id must be unique per instance: the layout renders a hidden
+  // narrow-screen mark next to the wide one, and a gradient defined inside a
+  // display:none SVG paints nothing for every other mark that references it.
+  const id = `ef-mark-${useId().replace(/:/g, '')}`;
 
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true" className={cx('shrink-0', spec.box, className)}>

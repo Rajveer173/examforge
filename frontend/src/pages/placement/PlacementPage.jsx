@@ -783,8 +783,8 @@ export function PlacementPage() {
                           <span
                             className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                               drive.driveType === 'ON_CAMPUS'
-                                ? 'bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/20'
-                                : 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20'
+                                ? 'bg-accent-soft text-accent-ink'
+                                : 'bg-positive-soft text-positive-ink'
                             }`}
                           >
                             {drive.driveType === 'ON_CAMPUS' ? 'On-Campus' : 'Off-Campus'}

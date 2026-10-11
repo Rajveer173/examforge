@@ -35,14 +35,14 @@ const envSchema = z.object({
     .string()
     .default('false')
     .transform((v) => v === 'true'),
-  // Pretrained model behind any OpenAI-compatible API. Defaults to a local Ollama
-  // server; when it is unreachable the AI features fall back to the built-in engine.
+  // LLM behind any OpenAI-compatible API, OpenRouter by default (needs LLM_API_KEY).
+  // When it is unreachable or rate limited the AI features fall back to the built-in engine.
   LLM_ENABLED: z
     .string()
     .default('true')
     .transform((v) => v !== 'false'),
-  LLM_BASE_URL: z.string().url().default('http://localhost:11434/v1'),
-  LLM_MODEL: z.string().min(1).default('qwen2.5:3b'),
+  LLM_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
+  LLM_MODEL: z.string().min(1).default('nvidia/nemotron-3-super-120b-a12b:free'),
   LLM_API_KEY: z.string().optional().default(''),
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).default(80_000),
   S3_ENDPOINT: z.string().default('http://localhost:9000'),

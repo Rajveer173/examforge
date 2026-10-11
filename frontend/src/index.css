@@ -4,96 +4,100 @@
 
 /*
  * ============================================================================
- * ExamForge — "Aperture" design language
+ * ExamForge — "Glass" design language
  * ============================================================================
  *
- * One full-bleed workspace. Chrome never occupies layout space: navigation and
- * context float above the content as translucent, blurred, rounded islands.
+ * Modelled on Apple's platform materials. One full-bleed workspace over a soft,
+ * fixed wallpaper; everything above it is a pane of frosted glass whose blur and
+ * translucency let that wallpaper tint through. Structure comes from material
+ * thickness, not from borders:
  *
- * Structure is drawn with DEPTH, not with rules. Every element sits on a
- * numbered layer, and its background, border, blur and shadow follow from that
- * layer rather than being chosen per component:
+ *   L0  wallpaper ......... bg-canvas + .mesh            no border, no shadow
+ *   L1  content cards ..... .card (regular material)     lit hairline, soft shadow
+ *   L2  hover / popover ... bg-surface-raised            hairline, shadow-raised
+ *   L3  floating chrome ... .glass (thick material)      lit hairline, shadow-dock
+ *   L4  modals / palette .. bg-surface-raised            hairline, shadow-overlay
  *
- *   L0  canvas ............ bg-canvas + .mesh          no border, no shadow
- *   L1  content cards ..... bg-surface                 border-line   shadow-card
- *   L2  hover / popover ... bg-surface-raised          border-line   shadow-raised
- *   L3  floating chrome ... .glass                     glass hairline shadow-dock
- *   L4  modals / palette .. bg-surface-raised          border-line   shadow-overlay
- *
- * That single rule is what makes the depth read as a system instead of as
- * decoration. Nothing on L1 gets a dock shadow.
- *
- * Colour is "Iris": a violet-blue accent over a cool near-white ground, with a
- * warm amber and a cyan reserved for the canvas mesh. Shadows are violet-tinted
- * rather than neutral grey — a grey shadow over this canvas reads as dirt.
+ * Colour is Apple's system palette: systemBlue for the accent, graphite greys
+ * (#1C1C1E / #2C2C2E) in dark mode, systemGroupedBackground (#F2F2F7) in light,
+ * and the system green / orange / red / teal for status. Shadows are neutral.
+ * Controls are filled (tertiary system fill), not outlined.
  *
  * Values are bare "R G B" triplets so Tailwind opacity modifiers keep working
- * (see tailwind.config.js). Contrast is verified numerically, not by eye:
- * ink >= 15:1, ink-muted >= 6.3:1, ink-subtle >= 4.8:1 and every tone-ink on
- * both its tone-soft and on surface >= 5.8:1, in both themes.
+ * (see tailwind.config.js). Contrast: ink >= 15:1, ink-muted >= 7:1,
+ * ink-subtle >= 4.6:1 on surface, in both themes.
  */
 @layer base {
   :root {
-    --canvas: 250 250 253;
+    --canvas: 242 242 247;
     --surface: 255 255 255;
     --surface-raised: 255 255 255;
-    --surface-sunken: 244 244 249;
+    --surface-sunken: 236 236 241;
 
-    --line: 231 231 240;
-    --line-strong: 210 210 224;
+    --line: 222 222 228;
+    --line-strong: 199 199 204;
 
-    --ink: 20 20 31;
-    --ink-muted: 88 88 108;
-    --ink-subtle: 106 106 128;
+    --ink: 29 29 31;
+    --ink-muted: 72 72 78;
+    --ink-subtle: 110 110 115;
 
-    --accent: 90 79 243;
-    --accent-hover: 74 63 224;
-    --accent-soft: 238 237 255;
-    --accent-ink: 62 52 190;
-    --accent-glow: 90 79 243;
-    /* Foreground for filled accent surfaces; the accent flips lightness between
-       themes, so the text on top of it cannot be a fixed white. */
+    --accent: 0 113 227;
+    --accent-hover: 0 98 204;
+    --accent-soft: 230 240 253;
+    --accent-ink: 0 92 190;
+    --accent-glow: 0 113 227;
+    /* Foreground for filled accent surfaces. */
     --on-accent: 255 255 255;
 
-    --positive: 14 138 95;
-    --positive-soft: 227 247 238;
-    --positive-ink: 7 107 72;
+    --positive: 36 138 61;
+    --positive-soft: 229 245 233;
+    --positive-ink: 26 112 48;
 
-    --caution: 166 106 0;
-    --caution-soft: 255 241 214;
-    --caution-ink: 126 80 0;
+    --caution: 201 92 0;
+    --caution-soft: 255 241 224;
+    --caution-ink: 150 66 0;
 
-    --critical: 217 45 58;
-    --critical-soft: 255 233 233;
-    --critical-ink: 168 28 40;
+    --critical: 215 0 21;
+    --critical-soft: 255 233 234;
+    --critical-ink: 176 0 18;
     --on-critical: 255 255 255;
 
-    --info: 14 127 168;
-    --info-soft: 224 242 250;
-    --info-ink: 10 98 133;
+    --info: 0 113 164;
+    --info-soft: 226 242 250;
+    --info-ink: 0 92 136;
 
-    /* Violet-tinted, never neutral. */
-    --shadow: 26 22 64;
+    --shadow: 0 0 0;
 
-    /* Floating chrome. --glass is the fill, used at alpha under a blur;
-       --glass-line is the hairline that gives the island a lit top edge. */
+    /* Tertiary system fill: the resting colour of buttons, fields and hovers. */
+    --fill: 118 118 128;
+    --fill-alpha: 0.1;
+
+    /* Regular material (cards). */
+    --material: 255 255 255;
+    --material-alpha: 0.7;
+    --material-line: 255 255 255;
+    --material-line-alpha: 0.8;
+    --material-edge: 0 0 0;
+    --material-edge-alpha: 0.06;
+
+    /* Thick material (floating chrome). */
     --glass: 255 255 255;
     --glass-line: 255 255 255;
-    --glass-alpha: 0.72;
-    --glass-line-alpha: 0.7;
+    --glass-alpha: 0.62;
+    --glass-line-alpha: 0.75;
 
-    /* The three stops of the canvas mesh. */
-    --mesh-a: 90 79 243;
-    --mesh-b: 255 176 32;
-    --mesh-c: 60 190 230;
-    --mesh-alpha: 0.07;
+    /* Wallpaper blooms behind the glass. */
+    --mesh-a: 0 122 255;
+    --mesh-b: 255 149 0;
+    --mesh-c: 88 86 214;
+    --mesh-alpha: 0.12;
 
     /* Always-dark slab for the auth and landing panels. Deliberately NOT
        redefined under .dark: the slab must stay dark in both themes. */
-    --panel: 13 12 28;
-    --panel-raised: 24 22 48;
-    --panel-ink: 238 238 246;
-    --panel-accent: 154 146 255;
+    --panel: 0 0 0;
+    --panel-raised: 28 28 30;
+    --panel-ink: 245 245 247;
+    --panel-accent: 100 170 255;
 
     /* Density metrics. data-density on <html> shifts control heights and table
        padding without every component branching on the setting. */
@@ -115,52 +119,65 @@
   }
 
   .dark {
-    --canvas: 11 11 16;
-    --surface: 22 22 30;
-    --surface-raised: 30 30 40;
-    --surface-sunken: 8 8 12;
+    --canvas: 0 0 0;
+    --surface: 28 28 30;
+    --surface-raised: 44 44 46;
+    --surface-sunken: 18 18 20;
 
-    --line: 42 42 55;
-    --line-strong: 64 64 82;
+    --line: 56 56 58;
+    --line-strong: 72 72 74;
 
-    --ink: 236 236 244;
-    --ink-muted: 166 166 186;
-    --ink-subtle: 142 142 164;
+    --ink: 245 245 247;
+    --ink-muted: 190 190 196;
+    --ink-subtle: 152 152 159;
 
-    --accent: 139 130 255;
-    --accent-hover: 163 156 255;
-    --accent-soft: 34 31 74;
-    --accent-ink: 186 180 255;
-    --accent-glow: 139 130 255;
-    --on-accent: 12 10 40;
+    --accent: 10 132 255;
+    --accent-hover: 64 156 255;
+    --accent-soft: 12 40 72;
+    --accent-ink: 100 170 255;
+    --accent-glow: 10 132 255;
+    --on-accent: 255 255 255;
 
-    --positive: 61 214 140;
-    --positive-soft: 13 51 38;
-    --positive-ink: 126 231 180;
+    --positive: 48 209 88;
+    --positive-soft: 12 48 22;
+    --positive-ink: 110 226 140;
 
-    --caution: 240 180 74;
-    --caution-soft: 58 42 16;
-    --caution-ink: 247 207 138;
+    --caution: 255 159 10;
+    --caution-soft: 56 38 8;
+    --caution-ink: 255 196 110;
 
-    --critical: 255 107 107;
-    --critical-soft: 62 29 32;
-    --critical-ink: 255 163 163;
-    --on-critical: 42 15 16;
+    --critical: 255 69 58;
+    --critical-soft: 64 20 18;
+    --critical-ink: 255 138 128;
+    --on-critical: 255 255 255;
 
-    --info: 79 195 232;
-    --info-soft: 12 51 65;
-    --info-ink: 150 220 242;
+    --info: 100 210 255;
+    --info-soft: 10 46 60;
+    --info-ink: 150 224 255;
 
     --shadow: 0 0 0;
 
-    /* On a dark ground the island has to be lighter than the page behind it,
-       and the lit edge has to be far weaker or it reads as a hard outline. */
-    --glass: 40 40 54;
-    --glass-line: 255 255 255;
-    --glass-alpha: 0.66;
-    --glass-line-alpha: 0.12;
+    --fill: 118 118 128;
+    --fill-alpha: 0.24;
 
-    --mesh-alpha: 0.1;
+    /* Dark materials are lighter than the black behind them; the lit top edge
+       has to be faint or it reads as an outline. */
+    --material: 30 30 32;
+    --material-alpha: 0.58;
+    --material-line: 255 255 255;
+    --material-line-alpha: 0.1;
+    --material-edge: 0 0 0;
+    --material-edge-alpha: 0.5;
+
+    --glass: 38 38 42;
+    --glass-line: 255 255 255;
+    --glass-alpha: 0.55;
+    --glass-line-alpha: 0.14;
+
+    --mesh-a: 10 132 255;
+    --mesh-b: 48 176 199;
+    --mesh-c: 94 92 230;
+    --mesh-alpha: 0.26;
 
     color-scheme: dark;
   }
@@ -186,7 +203,13 @@
   }
 
   ::selection {
-    background-color: rgb(var(--accent) / 0.2);
+    background-color: rgb(var(--accent) / 0.28);
+  }
+
+  /* SF Pro's optical sizing does this natively; Inter needs the hints. */
+  body {
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    letter-spacing: -0.006em;
   }
 
   h1,
@@ -232,21 +255,22 @@
   }
 
   .eyebrow {
-    @apply font-mono text-[0.6875rem] font-medium uppercase leading-4 tracking-[0.1em] text-ink-subtle;
+    @apply text-[0.6875rem] font-semibold uppercase leading-4 tracking-[0.06em] text-ink-subtle;
   }
 
   /* ---------------------------------------------------------------- buttons
    *
-   * Pill geometry, a lifted resting state for the primary action, and a 1px
-   * translate on press so a click has a physical answer.
+   * Capsules, as on Apple platforms. The primary action is a flat filled
+   * capsule (no glow); secondary and ghost are tinted fills, never outlines.
+   * Pressing scales down slightly, which reads as the pane giving way.
    */
   .btn {
     @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-full
            border border-transparent text-sm font-semibold leading-none
            transition-[background-color,border-color,color,box-shadow,transform] duration-150
-           active:translate-y-px
-           disabled:pointer-events-none disabled:opacity-45 disabled:active:translate-y-0;
-    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+           active:scale-[0.97]
+           disabled:pointer-events-none disabled:opacity-40 disabled:active:scale-100;
+    transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
   }
   .btn-sm {
     height: var(--control-sm);
@@ -262,25 +286,37 @@
   }
 
   .btn-primary {
-    @apply btn bg-accent text-accent-on shadow-glow hover:bg-accent-hover hover:shadow-glow-lg;
+    @apply btn bg-accent text-accent-on hover:bg-accent-hover;
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.18), 0 1px 2px 0 rgb(var(--shadow) / 0.12);
   }
   .btn-secondary {
-    @apply btn border-line-strong bg-surface text-ink shadow-card hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink;
+    @apply btn text-ink;
+    background-color: rgb(var(--fill) / var(--fill-alpha));
+  }
+  .btn-secondary:hover {
+    background-color: rgb(var(--fill) / calc(var(--fill-alpha) * 1.6));
   }
   .btn-ghost {
-    @apply btn text-ink-muted hover:bg-accent-soft hover:text-accent-ink;
+    @apply btn text-accent-ink;
+  }
+  .btn-ghost:hover {
+    background-color: rgb(var(--fill) / var(--fill-alpha));
   }
   .btn-danger {
     @apply btn bg-critical text-critical-on hover:brightness-110;
   }
 
-  /* ------------------------------------------------------------------ forms */
+  /* ------------------------------------------------------------------ forms
+   *
+   * Filled fields with no resting border; focus draws the system-blue ring.
+   */
   .input {
     height: var(--control-md);
-    @apply w-full rounded-xl border border-line-strong bg-surface px-4 text-sm text-ink
-           transition-[border-color,box-shadow] duration-150 placeholder:text-ink-subtle
-           focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15
-           disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-ink-subtle;
+    background-color: rgb(var(--fill) / calc(var(--fill-alpha) * 0.75));
+    @apply w-full rounded-xl border border-transparent px-4 text-sm text-ink
+           transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-ink-subtle
+           focus:border-accent focus:bg-surface focus:outline-none focus:ring-4 focus:ring-accent/20
+           disabled:cursor-not-allowed disabled:opacity-60;
   }
   textarea.input {
     @apply h-auto min-h-[6rem] py-3 leading-relaxed;
@@ -293,22 +329,43 @@
     @apply mb-2 block text-[0.8125rem] font-semibold leading-5 text-ink;
   }
 
-  /* -------------------------------------------------------------- L1 / card */
+  /* ------------------------------------------------------- L1 / card: material
+   *
+   * A pane of regular material: translucent fill under a blur, a lit hairline
+   * on the top edge and a darker one around it so it separates from both a
+   * bright and a dark wallpaper.
+   */
   .card {
-    @apply rounded-2xl border border-line bg-surface shadow-card;
+    @apply rounded-2xl;
+    background-color: rgb(var(--material) / var(--material-alpha));
+    backdrop-filter: blur(28px) saturate(170%);
+    -webkit-backdrop-filter: blur(28px) saturate(170%);
+    border: 1px solid rgb(var(--material-line) / var(--material-line-alpha));
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / calc(var(--material-line-alpha) * 0.9)),
+      0 0 0 0.5px rgb(var(--material-edge) / var(--material-edge-alpha)),
+      0 1px 2px 0 rgb(var(--shadow) / 0.05),
+      0 8px 24px -10px rgb(var(--shadow) / 0.14);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .card {
+      background-color: rgb(var(--surface));
+    }
   }
   .card-pad {
     @apply card p-6;
   }
   /* L2: the hover answer for anything interactive built on .card. */
   .card-interactive {
-    @apply card transition-[transform,box-shadow,border-color] duration-200
-           hover:-translate-y-0.5 hover:border-accent/25 hover:shadow-raised;
-    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    @apply card transition-[transform,box-shadow,background-color] duration-200 hover:-translate-y-0.5;
+    transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  .card-interactive:hover {
+    background-color: rgb(var(--material) / calc(var(--material-alpha) + 0.12));
   }
 
   .link {
-    @apply font-semibold text-accent decoration-accent/30 underline-offset-[3px]
+    @apply font-semibold text-accent-ink decoration-accent/30 underline-offset-[3px]
            transition-colors hover:text-accent-hover hover:decoration-accent-hover/60 hover:underline;
   }
 
@@ -321,19 +378,18 @@
   }
   .table-base thead th {
     padding: 0.625rem var(--cell-x);
-    @apply sticky top-0 z-[1] whitespace-nowrap border-b border-line bg-surface-sunken
-           text-left font-mono text-[0.6875rem] font-medium uppercase leading-4
-           tracking-[0.09em] text-ink-subtle;
+    @apply sticky top-0 z-[1] whitespace-nowrap border-b border-line/70 bg-surface-sunken/80
+           text-left text-[0.75rem] font-semibold leading-4 text-ink-subtle backdrop-blur-xl;
   }
   .table-base tbody td {
     padding: var(--cell-y) var(--cell-x);
-    @apply border-b border-line align-middle text-ink-muted;
+    @apply border-b border-line/60 align-middle text-ink-muted;
   }
   .table-base tbody tr:last-child td {
     @apply border-b-0;
   }
   .table-base tbody tr {
-    @apply transition-colors hover:bg-accent-soft/45;
+    @apply transition-colors hover:bg-ink/[0.04];
   }
 }
 
@@ -346,17 +402,19 @@
    */
   .glass {
     background-color: rgb(var(--glass) / var(--glass-alpha));
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(190%);
+    -webkit-backdrop-filter: blur(40px) saturate(190%);
     border: 1px solid rgb(var(--glass-line) / var(--glass-line-alpha));
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.28),
-      0 2px 8px -2px rgb(var(--shadow) / 0.10),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.6),
+      0 0 0 0.5px rgb(0 0 0 / 0.06),
+      0 2px 8px -2px rgb(var(--shadow) / 0.08),
       0 18px 44px -12px rgb(var(--shadow) / 0.22);
   }
   .dark .glass {
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.07),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+      0 0 0 0.5px rgb(0 0 0 / 0.6),
       0 2px 8px -2px rgb(0 0 0 / 0.5),
       0 18px 44px -12px rgb(0 0 0 / 0.66);
   }
@@ -387,6 +445,14 @@
       rgb(var(--accent) / 0.1) 0%,
       transparent 62%
     );
+  }
+
+  /* Small-caps labels are set in the system face, as on Apple platforms; mono
+     is kept for code and figures. Two classes outrank the single font utility. */
+  .font-mono.uppercase {
+    font-family: theme('fontFamily.sans');
+    font-weight: 600;
+    letter-spacing: 0.05em;
   }
 
   .scrollbar-slim {

@@ -1,38 +1,208 @@
 import { prisma } from '../config/database.js';
 import { notFound, badRequest } from '../utils/errors.js';
+import {
+  BRANCHES,
+  branchMatches,
+  canonicalBranch,
+  canonicalBranchList,
+  readBranchList,
+} from '../utils/branches.js';
 
 export interface UpsertProfileInput {
   fullName: string;
-  rollNumber?: string;
-  phone?: string;
-  branch?: string;
+  rollNumber?: string | null;
+  phone?: string | null;
+  branch: string;
   cgpa: number;
-  tenthPercentage?: number;
-  twelfthPercentage?: number;
-  activeBacklogs?: number;
-  graduationYear?: number;
+  tenthPercentage?: number | null;
+  twelfthPercentage?: number | null;
+  activeBacklogs?: number | null;
+  graduationYear?: number | null;
   skills?: string[];
-  resumeUrl?: string;
-  githubUrl?: string;
-  linkedinUrl?: string;
+  resumeUrl?: string | null;
+  githubUrl?: string | null;
+  linkedinUrl?: string | null;
 }
+
+export type DriveType = 'ON_CAMPUS' | 'OFF_CAMPUS';
+export type DriveStatus = 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+export type ApplicationStatus = 'APPLIED' | 'SHORTLISTED' | 'INTERVIEWED' | 'SELECTED' | 'REJECTED';
 
 export interface CreateDriveInput {
   companyName: string;
   role: string;
-  description?: string;
-  driveType?: 'ON_CAMPUS' | 'OFF_CAMPUS';
-  eligibilityCgpa?: number;
+  description?: string | null;
+  driveType?: DriveType;
+  eligibilityCgpa?: number | null;
   eligibleBranches?: string[];
-  maxBacklogs?: number;
-  minTenthPercent?: number;
-  minTwelfthPercent?: number;
-  batchYear?: number;
-  ctcLpa?: number;
-  location?: string;
+  maxBacklogs?: number | null;
+  minTenthPercent?: number | null;
+  minTwelfthPercent?: number | null;
+  batchYear?: number | null;
+  ctcLpa?: number | null;
+  location?: string | null;
   deadline: string | Date;
-  driveDate?: string | Date;
-  status?: 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  driveDate?: string | Date | null;
+  status?: DriveStatus;
+}
+
+/** Drives in these states accept applications (subject to the deadline). */
+export const OPEN_DRIVE_STATUSES: readonly string[] = ['ACTIVE', 'UPCOMING'];
+/** Final decisions a student can no longer withdraw from. */
+const FINAL_APPLICATION_STATUSES: readonly string[] = ['SELECTED', 'REJECTED'];
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parse a date coming from the API. The UI sends a full ISO timestamp built
+ * from the admin's local calendar day; a bare "YYYY-MM-DD" from other clients
+ * is taken as the end of that day (UTC) for deadlines and midday for drive
+ * dates, so the stored instant never lands on the previous calendar day.
+ */
+function parseDateInput(value: string | Date, label: string, kind: 'deadline' | 'driveDate'): Date {
+  let d: Date;
+  if (value instanceof Date) d = value;
+  else if (DATE_ONLY.test(value.trim())) {
+    d = new Date(`${value.trim()}T${kind === 'deadline' ? '23:59:59.999' : '12:00:00.000'}Z`);
+  } else d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw badRequest(`${label} is not a valid date`);
+  return d;
+}
+
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function normaliseBranchesOrThrow(list: string[] | undefined): string[] {
+  if (!list) return [];
+  const { branches, unknown } = canonicalBranchList(list);
+  if (unknown.length) {
+    throw badRequest(
+      `Unknown branch${unknown.length > 1 ? 'es' : ''}: ${unknown.join(', ')}. Choose from: ${BRANCHES.join(', ')}`
+    );
+  }
+  return branches;
+}
+
+type ProfileLike = {
+  cgpa: number;
+  branch: string | null;
+  activeBacklogs: number;
+  tenthPercentage: number | null;
+  twelfthPercentage: number | null;
+  graduationYear: number | null;
+};
+
+type DriveLike = {
+  eligibilityCgpa: number;
+  eligibleBranches: unknown;
+  maxBacklogs: number | null;
+  minTenthPercent: number | null;
+  minTwelfthPercent: number | null;
+  batchYear: number | null;
+  deadline: Date;
+  status: string;
+};
+
+/**
+ * The single eligibility rule set. Used by the drive list, the drive detail
+ * and the apply endpoint so the badge a student sees always agrees with what
+ * the server enforces.
+ */
+export function evaluateEligibility(drive: DriveLike, profile: ProfileLike | null) {
+  const reasons: string[] = [];
+  if (!profile) {
+    return { isEligible: false, reasons: ['Complete your placement profile to check eligibility'] };
+  }
+
+  if (drive.eligibilityCgpa > 0 && profile.cgpa < drive.eligibilityCgpa) {
+    reasons.push(`Minimum CGPA is ${drive.eligibilityCgpa} (yours: ${profile.cgpa})`);
+  }
+
+  const branches = readBranchList(drive.eligibleBranches);
+  if (branches.length > 0 && !branchMatches(profile.branch, branches)) {
+    const mine = canonicalBranch(profile.branch) ?? profile.branch ?? 'not set';
+    reasons.push(`Open to ${branches.join(', ')} only (your branch: ${mine})`);
+  }
+
+  if (drive.maxBacklogs !== null && drive.maxBacklogs !== undefined && profile.activeBacklogs > drive.maxBacklogs) {
+    reasons.push(
+      drive.maxBacklogs === 0
+        ? `No active backlogs allowed (you have ${profile.activeBacklogs})`
+        : `At most ${drive.maxBacklogs} active backlog${drive.maxBacklogs === 1 ? '' : 's'} allowed (you have ${profile.activeBacklogs})`
+    );
+  }
+
+  if (drive.minTenthPercent && drive.minTenthPercent > 0) {
+    if (profile.tenthPercentage === null || profile.tenthPercentage === undefined) {
+      reasons.push(`Minimum 10th marks is ${drive.minTenthPercent}% (add your 10th % to your profile)`);
+    } else if (profile.tenthPercentage < drive.minTenthPercent) {
+      reasons.push(`Minimum 10th marks is ${drive.minTenthPercent}% (yours: ${profile.tenthPercentage}%)`);
+    }
+  }
+
+  if (drive.minTwelfthPercent && drive.minTwelfthPercent > 0) {
+    if (profile.twelfthPercentage === null || profile.twelfthPercentage === undefined) {
+      reasons.push(`Minimum 12th/diploma marks is ${drive.minTwelfthPercent}% (add your 12th % to your profile)`);
+    } else if (profile.twelfthPercentage < drive.minTwelfthPercent) {
+      reasons.push(`Minimum 12th/diploma marks is ${drive.minTwelfthPercent}% (yours: ${profile.twelfthPercentage}%)`);
+    }
+  }
+
+  if (drive.batchYear) {
+    if (!profile.graduationYear) {
+      reasons.push(`Only for the ${drive.batchYear} batch (add your graduation year to your profile)`);
+    } else if (profile.graduationYear !== drive.batchYear) {
+      reasons.push(`Only for the ${drive.batchYear} batch (yours: ${profile.graduationYear})`);
+    }
+  }
+
+  return { isEligible: reasons.length === 0, reasons };
+}
+
+/** Whether the drive is currently taking applications, and why not if it isn't. */
+export function applicationWindow(drive: Pick<DriveLike, 'deadline' | 'status'>, now = new Date()) {
+  const isExpired = new Date(drive.deadline).getTime() < now.getTime();
+  if (!OPEN_DRIVE_STATUSES.includes(drive.status)) {
+    return {
+      isOpen: false,
+      isExpired,
+      closedReason: `This drive is ${drive.status.toLowerCase()} and no longer accepts applications`,
+    };
+  }
+  if (isExpired) {
+    return {
+      isOpen: false,
+      isExpired,
+      closedReason: 'The application deadline for this drive has passed',
+    };
+  }
+  return { isOpen: true, isExpired, closedReason: null as string | null };
+}
+
+function studentView(drive: any, profile: ProfileLike | null, application: any | null) {
+  const { isEligible, reasons } = evaluateEligibility(drive, profile);
+  const window = applicationWindow(drive);
+  return {
+    isEligible,
+    eligibilityReasons: reasons,
+    eligibilityReason: reasons.join('; '),
+    isExpired: window.isExpired,
+    isOpen: window.isOpen,
+    closedReason: window.closedReason,
+    canApply: !application && isEligible && window.isOpen,
+    hasApplied: !!application,
+    applicationId: application?.id ?? null,
+    applicationStatus: application?.status ?? null,
+    applicationNotes: application?.notes ?? null,
+    appliedAt: application?.appliedAt ?? null,
+  };
+}
+
+function countByStatus(applications: { status: string }[]) {
+  const counts: Record<string, number> = { APPLIED: 0, SHORTLISTED: 0, INTERVIEWED: 0, SELECTED: 0, REJECTED: 0 };
+  for (const a of applications) counts[a.status] = (counts[a.status] ?? 0) + 1;
+  return counts;
 }
 
 export class PlacementService {
@@ -61,33 +231,34 @@ export class PlacementService {
    * Create or update placement profile (POD registration)
    */
   async upsertProfile(userId: string, input: UpsertProfileInput) {
+    const branch = canonicalBranch(input.branch);
+    if (!branch) {
+      throw badRequest(`Unknown branch "${input.branch}". Choose from: ${BRANCHES.join(', ')}`);
+    }
+
+    const optional = (v: number | null | undefined) => (v === undefined || v === null ? null : Number(v));
     const data = {
-      fullName: input.fullName,
-      rollNumber: input.rollNumber || null,
-      phone: input.phone || null,
-      branch: input.branch || null,
-      cgpa: Number(input.cgpa) || 0,
-      tenthPercentage: input.tenthPercentage !== undefined && input.tenthPercentage !== null ? Number(input.tenthPercentage) : null,
-      twelfthPercentage: input.twelfthPercentage !== undefined && input.twelfthPercentage !== null ? Number(input.twelfthPercentage) : null,
-      activeBacklogs: input.activeBacklogs !== undefined && input.activeBacklogs !== null ? Number(input.activeBacklogs) : 0,
-      graduationYear: input.graduationYear !== undefined && input.graduationYear !== null ? Number(input.graduationYear) : null,
-      skills: input.skills || [],
-      resumeUrl: input.resumeUrl || null,
-      githubUrl: input.githubUrl || null,
-      linkedinUrl: input.linkedinUrl || null,
+      fullName: input.fullName.trim(),
+      rollNumber: input.rollNumber?.trim() || null,
+      phone: input.phone?.trim() || null,
+      branch,
+      cgpa: Number(input.cgpa),
+      tenthPercentage: optional(input.tenthPercentage),
+      twelfthPercentage: optional(input.twelfthPercentage),
+      activeBacklogs: input.activeBacklogs === undefined || input.activeBacklogs === null ? 0 : Number(input.activeBacklogs),
+      graduationYear: optional(input.graduationYear),
+      skills: Array.from(new Set((input.skills || []).map((s) => s.trim()).filter(Boolean))),
+      resumeUrl: input.resumeUrl?.trim() || null,
+      githubUrl: input.githubUrl?.trim() || null,
+      linkedinUrl: input.linkedinUrl?.trim() || null,
       isVerified: true,
     };
 
-    const profile = await prisma.placementProfile.upsert({
+    return prisma.placementProfile.upsert({
       where: { userId },
-      create: {
-        userId,
-        ...data,
-      },
+      create: { userId, ...data },
       update: data,
     });
-
-    return profile;
   }
 
   /**
@@ -121,94 +292,35 @@ export class PlacementService {
           select: { id: true, fullName: true, username: true, email: true },
         },
         applications: {
-          select: { id: true },
+          select: { id: true, status: true },
         },
       },
     });
 
-    // If student, check eligibility and application status for each drive
     if (userRole === 'STUDENT') {
-      const studentProfile = await prisma.placementProfile.findUnique({
-        where: { userId },
-      });
-
-      const studentApplications = await prisma.placementApplication.findMany({
-        where: { studentId: userId },
-      });
-
+      const [studentProfile, studentApplications] = await Promise.all([
+        prisma.placementProfile.findUnique({ where: { userId } }),
+        prisma.placementApplication.findMany({ where: { studentId: userId } }),
+      ]);
       const appMap = new Map(studentApplications.map((app) => [app.driveId, app]));
 
-      let evaluatedDrives = drives.map((drive: any) => {
-        const application = appMap.get(drive.id) || null;
-        let isEligible = true;
-        const reasons: string[] = [];
-
-        if (!studentProfile) {
-          isEligible = false;
-          reasons.push('Please complete placement registration profile');
-        } else {
-          if (drive.eligibilityCgpa > 0 && studentProfile.cgpa < drive.eligibilityCgpa) {
-            isEligible = false;
-            reasons.push(`Minimum CGPA: ${drive.eligibilityCgpa} (Your CGPA: ${studentProfile.cgpa})`);
-          }
-
-          const eligibleBranches = Array.isArray(drive.eligibleBranches)
-            ? (drive.eligibleBranches as string[])
-            : [];
-          if (
-            eligibleBranches.length > 0 &&
-            (!studentProfile.branch || !eligibleBranches.includes(studentProfile.branch))
-          ) {
-            isEligible = false;
-            reasons.push(`Eligible branches: ${eligibleBranches.join(', ')} (Your branch: ${studentProfile.branch || 'None'})`);
-          }
-
-          if (drive.maxBacklogs !== undefined && drive.maxBacklogs !== null && studentProfile.activeBacklogs > drive.maxBacklogs) {
-            isEligible = false;
-            reasons.push(`Max ${drive.maxBacklogs} active backlogs allowed (You have ${studentProfile.activeBacklogs})`);
-          }
-
-          if (drive.minTenthPercent && studentProfile.tenthPercentage && studentProfile.tenthPercentage < drive.minTenthPercent) {
-            isEligible = false;
-            reasons.push(`Minimum 10th marks: ${drive.minTenthPercent}% (You have ${studentProfile.tenthPercentage}%)`);
-          }
-
-          if (drive.minTwelfthPercent && studentProfile.twelfthPercentage && studentProfile.twelfthPercentage < drive.minTwelfthPercent) {
-            isEligible = false;
-            reasons.push(`Minimum 12th marks: ${drive.minTwelfthPercent}% (You have ${studentProfile.twelfthPercentage}%)`);
-          }
-
-          if (drive.batchYear && studentProfile.graduationYear && studentProfile.graduationYear !== drive.batchYear) {
-            isEligible = false;
-            reasons.push(`Eligible Batch: ${drive.batchYear} (Your batch: ${studentProfile.graduationYear})`);
-          }
-        }
-
-        const isExpired = new Date(drive.deadline) < new Date();
-
-        return {
-          ...drive,
-          applicantCount: drive.applications.length,
-          hasApplied: !!application,
-          applicationStatus: application ? application.status : null,
-          appliedAt: application ? application.appliedAt : null,
-          isEligible,
-          eligibilityReason: reasons.join('; '),
-          isExpired,
-        };
-      });
+      let evaluated = drives.map(({ applications, ...drive }) => ({
+        ...drive,
+        applicantCount: applications.length,
+        ...studentView(drive, studentProfile, appMap.get(drive.id) ?? null),
+      }));
 
       if (filters?.onlyEligible) {
-        evaluatedDrives = evaluatedDrives.filter((d) => d.isEligible);
+        evaluated = evaluated.filter((d) => d.isEligible);
       }
-
-      return evaluatedDrives;
+      return evaluated;
     }
 
-    return drives.map((drive: any) => ({
+    return drives.map(({ applications, ...drive }) => ({
       ...drive,
-      applicantCount: drive.applications.length,
-      isExpired: new Date(drive.deadline) < new Date(),
+      applicantCount: applications.length,
+      statusCounts: countByStatus(applications),
+      ...applicationWindow(drive),
     }));
   }
 
@@ -244,87 +356,67 @@ export class PlacementService {
     }
 
     if (userRole === 'STUDENT') {
-      const studentProfile = await prisma.placementProfile.findUnique({
-        where: { userId },
-      });
-      const application = drive.applications.find((app: any) => app.studentId === userId);
-
-      let isEligible = true;
-      const reasons: string[] = [];
-      if (!studentProfile) {
-        isEligible = false;
-        reasons.push('Please complete placement registration profile');
-      } else {
-        if (drive.eligibilityCgpa > 0 && studentProfile.cgpa < drive.eligibilityCgpa) {
-          isEligible = false;
-          reasons.push(`Minimum CGPA: ${drive.eligibilityCgpa} (Yours: ${studentProfile.cgpa})`);
-        }
-        const branches = Array.isArray(drive.eligibleBranches) ? (drive.eligibleBranches as string[]) : [];
-        if (branches.length > 0 && (!studentProfile.branch || !branches.includes(studentProfile.branch))) {
-          isEligible = false;
-          reasons.push(`Eligible branches: ${branches.join(', ')}`);
-        }
-        if (drive.maxBacklogs !== undefined && drive.maxBacklogs !== null && studentProfile.activeBacklogs > drive.maxBacklogs) {
-          isEligible = false;
-          reasons.push(`Max backlogs: ${drive.maxBacklogs} (You have: ${studentProfile.activeBacklogs})`);
-        }
-        if (drive.minTenthPercent && studentProfile.tenthPercentage && studentProfile.tenthPercentage < drive.minTenthPercent) {
-          isEligible = false;
-          reasons.push(`Min 10th: ${drive.minTenthPercent}% (Yours: ${studentProfile.tenthPercentage}%)`);
-        }
-        if (drive.minTwelfthPercent && studentProfile.twelfthPercentage && studentProfile.twelfthPercentage < drive.minTwelfthPercent) {
-          isEligible = false;
-          reasons.push(`Min 12th: ${drive.minTwelfthPercent}% (Yours: ${studentProfile.twelfthPercentage}%)`);
-        }
-        if (drive.batchYear && studentProfile.graduationYear && studentProfile.graduationYear !== drive.batchYear) {
-          isEligible = false;
-          reasons.push(`Target Batch: ${drive.batchYear} (Yours: ${studentProfile.graduationYear})`);
-        }
-      }
-
+      const studentProfile = await prisma.placementProfile.findUnique({ where: { userId } });
+      const application = drive.applications.find((app) => app.studentId === userId) ?? null;
+      const { applications, ...rest } = drive;
+      // Other students' applications are never exposed to a student.
       return {
-        ...drive,
-        applications: undefined, // Hide other students' applications from student
-        applicantCount: drive.applications.length,
-        hasApplied: !!application,
-        applicationStatus: application?.status || null,
-        appliedAt: application?.appliedAt || null,
-        isEligible,
-        eligibilityReason: reasons.join('; '),
+        ...rest,
+        applicantCount: applications.length,
+        ...studentView(drive, studentProfile, application),
       };
     }
 
     return {
       ...drive,
       applicantCount: drive.applications.length,
+      statusCounts: countByStatus(drive.applications),
+      ...applicationWindow(drive),
     };
   }
 
+  private validateDates(deadline: Date, driveDate: Date | null, status: string, deadlineChanged: boolean) {
+    if (driveDate && driveDate.getTime() < deadline.getTime() - 24 * 3600 * 1000) {
+      throw badRequest(
+        `Drive date (${fmtDate(driveDate)}) cannot be before the application deadline (${fmtDate(deadline)})`
+      );
+    }
+    if (deadlineChanged && OPEN_DRIVE_STATUSES.includes(status) && deadline.getTime() < Date.now()) {
+      throw badRequest(
+        'Application deadline must be in the future for an ACTIVE or UPCOMING drive (mark past drives COMPLETED or CANCELLED)'
+      );
+    }
+  }
+
   /**
-   * Create a new placement drive (Admin / Teacher / Staff)
+   * Create a new placement drive (Admin / Teacher)
    */
   async createDrive(createdById: string, input: CreateDriveInput) {
-    const drive = await prisma.placementDrive.create({
+    const deadline = parseDateInput(input.deadline, 'Application deadline', 'deadline');
+    const driveDate = input.driveDate ? parseDateInput(input.driveDate, 'Drive date', 'driveDate') : null;
+    const status = input.status || 'UPCOMING';
+    this.validateDates(deadline, driveDate, status, true);
+
+    return prisma.placementDrive.create({
       data: {
-        companyName: input.companyName,
-        role: input.role,
-        description: input.description || null,
+        companyName: input.companyName.trim(),
+        role: input.role.trim(),
+        description: input.description?.trim() || null,
         driveType: input.driveType || 'ON_CAMPUS',
-        eligibilityCgpa: input.eligibilityCgpa !== undefined ? Number(input.eligibilityCgpa) : 0,
-        eligibleBranches: input.eligibleBranches || [],
-        maxBacklogs: input.maxBacklogs !== undefined && input.maxBacklogs !== null ? Number(input.maxBacklogs) : 0,
-        minTenthPercent: input.minTenthPercent !== undefined && input.minTenthPercent !== null ? Number(input.minTenthPercent) : null,
-        minTwelfthPercent: input.minTwelfthPercent !== undefined && input.minTwelfthPercent !== null ? Number(input.minTwelfthPercent) : null,
-        batchYear: input.batchYear !== undefined && input.batchYear !== null ? Number(input.batchYear) : null,
-        ctcLpa: input.ctcLpa !== undefined ? Number(input.ctcLpa) : null,
-        location: input.location || null,
-        deadline: new Date(input.deadline),
-        driveDate: input.driveDate ? new Date(input.driveDate) : null,
-        status: input.status || 'UPCOMING',
+        eligibilityCgpa: input.eligibilityCgpa ?? 0,
+        eligibleBranches: normaliseBranchesOrThrow(input.eligibleBranches),
+        maxBacklogs: input.maxBacklogs ?? 0,
+        minTenthPercent: input.minTenthPercent ?? null,
+        minTwelfthPercent: input.minTwelfthPercent ?? null,
+        batchYear: input.batchYear ?? null,
+        ctcLpa: input.ctcLpa ?? null,
+        location: input.location?.trim() || null,
+        deadline,
+        driveDate,
+        status,
         createdById,
       },
     });
-    return drive;
   }
 
   /**
@@ -337,21 +429,33 @@ export class PlacementService {
     }
 
     const data: any = {};
-    if (input.companyName !== undefined) data.companyName = input.companyName;
-    if (input.role !== undefined) data.role = input.role;
-    if (input.description !== undefined) data.description = input.description;
+    if (input.companyName !== undefined) data.companyName = input.companyName.trim();
+    if (input.role !== undefined) data.role = input.role.trim();
+    if (input.description !== undefined) data.description = input.description?.trim() || null;
     if (input.driveType !== undefined) data.driveType = input.driveType;
-    if (input.eligibilityCgpa !== undefined) data.eligibilityCgpa = Number(input.eligibilityCgpa);
-    if (input.eligibleBranches !== undefined) data.eligibleBranches = input.eligibleBranches;
-    if (input.maxBacklogs !== undefined) data.maxBacklogs = Number(input.maxBacklogs);
-    if (input.minTenthPercent !== undefined) data.minTenthPercent = input.minTenthPercent !== null ? Number(input.minTenthPercent) : null;
-    if (input.minTwelfthPercent !== undefined) data.minTwelfthPercent = input.minTwelfthPercent !== null ? Number(input.minTwelfthPercent) : null;
-    if (input.batchYear !== undefined) data.batchYear = input.batchYear !== null ? Number(input.batchYear) : null;
-    if (input.ctcLpa !== undefined) data.ctcLpa = Number(input.ctcLpa);
-    if (input.location !== undefined) data.location = input.location;
-    if (input.deadline !== undefined) data.deadline = new Date(input.deadline);
-    if (input.driveDate !== undefined) data.driveDate = input.driveDate ? new Date(input.driveDate) : null;
+    if (input.eligibilityCgpa !== undefined) data.eligibilityCgpa = input.eligibilityCgpa ?? 0;
+    if (input.eligibleBranches !== undefined) data.eligibleBranches = normaliseBranchesOrThrow(input.eligibleBranches);
+    if (input.maxBacklogs !== undefined) data.maxBacklogs = input.maxBacklogs ?? 0;
+    if (input.minTenthPercent !== undefined) data.minTenthPercent = input.minTenthPercent;
+    if (input.minTwelfthPercent !== undefined) data.minTwelfthPercent = input.minTwelfthPercent;
+    if (input.batchYear !== undefined) data.batchYear = input.batchYear;
+    if (input.ctcLpa !== undefined) data.ctcLpa = input.ctcLpa;
+    if (input.location !== undefined) data.location = input.location?.trim() || null;
+    if (input.deadline !== undefined) data.deadline = parseDateInput(input.deadline, 'Application deadline', 'deadline');
+    if (input.driveDate !== undefined) {
+      data.driveDate = input.driveDate ? parseDateInput(input.driveDate, 'Drive date', 'driveDate') : null;
+    }
     if (input.status !== undefined) data.status = input.status;
+
+    const deadline: Date = data.deadline ?? existing.deadline;
+    const driveDate: Date | null = data.driveDate !== undefined ? data.driveDate : existing.driveDate;
+    const status: string = data.status ?? existing.status;
+    // Re-saving an unchanged past deadline (e.g. editing the description of a
+    // closed drive) is fine; only a newly entered deadline must be in the future.
+    const deadlineChanged =
+      data.deadline !== undefined && Math.abs(data.deadline.getTime() - existing.deadline.getTime()) > 60_000;
+    const reopened = data.status !== undefined && !OPEN_DRIVE_STATUSES.includes(existing.status);
+    this.validateDates(deadline, driveDate, status, deadlineChanged || reopened);
 
     return prisma.placementDrive.update({
       where: { id: driveId },
@@ -360,14 +464,18 @@ export class PlacementService {
   }
 
   /**
-   * Delete drive
+   * Delete drive (applications cascade)
    */
   async deleteDrive(driveId: string) {
-    const existing = await prisma.placementDrive.findUnique({ where: { id: driveId } });
+    const existing = await prisma.placementDrive.findUnique({
+      where: { id: driveId },
+      include: { _count: { select: { applications: true } } },
+    });
     if (!existing) {
       throw notFound('Placement drive');
     }
-    return prisma.placementDrive.delete({ where: { id: driveId } });
+    await prisma.placementDrive.delete({ where: { id: driveId } });
+    return { id: driveId, removedApplications: existing._count.applications };
   }
 
   /**
@@ -379,75 +487,30 @@ export class PlacementService {
       throw notFound('Placement drive');
     }
 
-    if (new Date(drive.deadline) < new Date()) {
-      throw badRequest('Deadline has passed for this placement drive');
+    const existingApplication = await prisma.placementApplication.findUnique({
+      where: { driveId_studentId: { driveId, studentId } },
+    });
+    if (existingApplication) {
+      throw badRequest(`You have already applied for this drive (status: ${existingApplication.status})`);
     }
 
-    if (drive.status === 'COMPLETED' || drive.status === 'CANCELLED') {
-      throw badRequest(`This drive is no longer accepting applications (Status: ${drive.status})`);
+    const window = applicationWindow(drive);
+    if (!window.isOpen) {
+      throw badRequest(window.closedReason!);
     }
 
     const profile = await prisma.placementProfile.findUnique({ where: { userId: studentId } });
     if (!profile) {
-      throw badRequest('Please complete your Placement Registration Profile first before applying');
+      throw badRequest('Please complete your placement profile before applying');
     }
 
-    if (drive.eligibilityCgpa > 0 && profile.cgpa < drive.eligibilityCgpa) {
-      throw badRequest(
-        `Eligibility criteria not met: Required CGPA is ${drive.eligibilityCgpa}, but your CGPA is ${profile.cgpa}`
-      );
-    }
-
-    const branches = Array.isArray(drive.eligibleBranches) ? (drive.eligibleBranches as string[]) : [];
-    if (branches.length > 0 && (!profile.branch || !branches.includes(profile.branch))) {
-      throw badRequest(
-        `Eligibility criteria not met: Allowed branches are ${branches.join(', ')}, but your branch is ${profile.branch || 'unspecified'}`
-      );
-    }
-
-    if (drive.maxBacklogs !== undefined && drive.maxBacklogs !== null && profile.activeBacklogs > drive.maxBacklogs) {
-      throw badRequest(
-        `Eligibility criteria not met: Maximum allowed backlogs is ${drive.maxBacklogs}, but you have ${profile.activeBacklogs}`
-      );
-    }
-
-    if (drive.minTenthPercent && profile.tenthPercentage && profile.tenthPercentage < drive.minTenthPercent) {
-      throw badRequest(
-        `Eligibility criteria not met: Minimum 10th marks required is ${drive.minTenthPercent}%, but you have ${profile.tenthPercentage}%`
-      );
-    }
-
-    if (drive.minTwelfthPercent && profile.twelfthPercentage && profile.twelfthPercentage < drive.minTwelfthPercent) {
-      throw badRequest(
-        `Eligibility criteria not met: Minimum 12th marks required is ${drive.minTwelfthPercent}%, but you have ${profile.twelfthPercentage}%`
-      );
-    }
-
-    if (drive.batchYear && profile.graduationYear && profile.graduationYear !== drive.batchYear) {
-      throw badRequest(
-        `Eligibility criteria not met: Drive is for graduation year ${drive.batchYear}, but your year is ${profile.graduationYear}`
-      );
-    }
-
-    const existingApplication = await prisma.placementApplication.findUnique({
-      where: {
-        driveId_studentId: {
-          driveId,
-          studentId,
-        },
-      },
-    });
-
-    if (existingApplication) {
-      throw badRequest('You have already applied for this placement drive');
+    const { isEligible, reasons } = evaluateEligibility(drive, profile);
+    if (!isEligible) {
+      throw badRequest(`You are not eligible for this drive: ${reasons.join('; ')}`, { reasons });
     }
 
     return prisma.placementApplication.create({
-      data: {
-        driveId,
-        studentId,
-        status: 'APPLIED',
-      },
+      data: { driveId, studentId, status: 'APPLIED' },
     });
   }
 
@@ -456,24 +519,23 @@ export class PlacementService {
    */
   async withdrawApplication(driveId: string, studentId: string) {
     const application = await prisma.placementApplication.findUnique({
-      where: {
-        driveId_studentId: { driveId, studentId },
-      },
+      where: { driveId_studentId: { driveId, studentId } },
     });
 
     if (!application) {
       throw notFound('Application');
     }
+    if (FINAL_APPLICATION_STATUSES.includes(application.status)) {
+      throw badRequest(`This application already has a final decision (${application.status}) and cannot be withdrawn`);
+    }
 
-    return prisma.placementApplication.delete({
-      where: { id: application.id },
-    });
+    return prisma.placementApplication.delete({ where: { id: application.id } });
   }
 
   /**
    * Update application status (Admin/Teacher)
    */
-  async updateApplicationStatus(applicationId: string, status: string, notes?: string) {
+  async updateApplicationStatus(applicationId: string, status: ApplicationStatus, notes?: string | null) {
     const app = await prisma.placementApplication.findUnique({ where: { id: applicationId } });
     if (!app) {
       throw notFound('Application');
@@ -483,7 +545,7 @@ export class PlacementService {
       where: { id: applicationId },
       data: {
         status,
-        ...(notes !== undefined ? { notes } : {}),
+        ...(notes !== undefined ? { notes: notes?.trim() || null } : {}),
       },
       include: {
         student: {
@@ -515,31 +577,46 @@ export class PlacementService {
   async getStats() {
     const [
       totalRegisteredStudents,
-      totalDrives,
-      activeDrives,
-      onCampusDrives,
-      offCampusDrives,
-      totalApplications,
-      selectedCount,
+      drives,
+      applicationGroups,
+      placedStudents,
     ] = await Promise.all([
       prisma.placementProfile.count(),
-      prisma.placementDrive.count(),
-      prisma.placementDrive.count({ where: { status: 'ACTIVE' } }),
-      prisma.placementDrive.count({ where: { driveType: 'ON_CAMPUS' } }),
-      prisma.placementDrive.count({ where: { driveType: 'OFF_CAMPUS' } }),
-      prisma.placementApplication.count(),
-      prisma.placementApplication.count({ where: { status: 'SELECTED' } }),
+      prisma.placementDrive.findMany({ select: { status: true, driveType: true, ctcLpa: true } }),
+      prisma.placementApplication.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.placementApplication.findMany({
+        where: { status: 'SELECTED' },
+        distinct: ['studentId'],
+        select: { studentId: true },
+      }),
     ]);
+
+    const applicationsByStatus: Record<string, number> = {
+      APPLIED: 0, SHORTLISTED: 0, INTERVIEWED: 0, SELECTED: 0, REJECTED: 0,
+    };
+    for (const g of applicationGroups) applicationsByStatus[g.status] = g._count._all;
+    const totalApplications = Object.values(applicationsByStatus).reduce((a, b) => a + b, 0);
+
+    const ctcs = drives.map((d) => d.ctcLpa).filter((c): c is number => typeof c === 'number' && c > 0);
+    const countStatus = (s: string) => drives.filter((d) => d.status === s).length;
 
     return {
       totalRegisteredStudents,
-      totalDrives,
-      activeDrives,
-      onCampusDrives,
-      offCampusDrives,
+      totalDrives: drives.length,
+      activeDrives: countStatus('ACTIVE'),
+      upcomingDrives: countStatus('UPCOMING'),
+      completedDrives: countStatus('COMPLETED'),
+      cancelledDrives: countStatus('CANCELLED'),
+      onCampusDrives: drives.filter((d) => d.driveType === 'ON_CAMPUS').length,
+      offCampusDrives: drives.filter((d) => d.driveType === 'OFF_CAMPUS').length,
       totalApplications,
-      selectedCount,
-      placementRate: totalRegisteredStudents > 0 ? ((selectedCount / totalRegisteredStudents) * 100).toFixed(1) : '0',
+      applicationsByStatus,
+      selectedCount: applicationsByStatus.SELECTED,
+      placedStudents: placedStudents.length,
+      averageCtc: ctcs.length ? Math.round((ctcs.reduce((a, b) => a + b, 0) / ctcs.length) * 10) / 10 : null,
+      highestCtc: ctcs.length ? Math.max(...ctcs) : null,
+      placementRate:
+        totalRegisteredStudents > 0 ? ((placedStudents.length / totalRegisteredStudents) * 100).toFixed(1) : '0',
     };
   }
 }

@@ -763,153 +763,13 @@ async function main() {
     },
   });
 
-  // Demo Placement Profile (POD Registration)
-  await prisma.placementProfile.upsert({
-    where: { userId: student.id },
-    update: {
-      fullName: 'Alex Student',
-      rollNumber: 'CS2024-042',
-      phone: '+1 555-0199',
-      branch: 'Computer Science',
-      cgpa: 8.75,
-      tenthPercentage: 92.0,
-      twelfthPercentage: 89.5,
-      skills: ['React', 'Node.js', 'TypeScript', 'SQL', 'Python'],
-      githubUrl: 'https://github.com/alexstudent',
-      linkedinUrl: 'https://linkedin.com/in/alexstudent',
-      isVerified: true,
-    },
-    create: {
-      userId: student.id,
-      fullName: 'Alex Student',
-      rollNumber: 'CS2024-042',
-      phone: '+1 555-0199',
-      branch: 'Computer Science',
-      cgpa: 8.75,
-      tenthPercentage: 92.0,
-      tenthPercentage: 92.4,
-      twelfthPercentage: 89.5,
-      activeBacklogs: 0,
-      graduationYear: 2026,
-      skills: ['React', 'Node.js', 'TypeScript', 'SQL', 'Python'],
-      githubUrl: 'https://github.com/alexstudent',
-      linkedinUrl: 'https://linkedin.com/in/alexstudent',
-      isVerified: true,
-    },
-  });
-
-  // Demo Placement Drives
-  const driveGoogle = await prisma.placementDrive.upsert({
-    where: { id: 'drive-google-sde' },
-    update: {},
-    create: {
-      id: 'drive-google-sde',
-      companyName: 'Google',
-      role: 'Software Engineer Intern',
-      description: 'Design scalable distributed systems, collaborate with cross-functional engineering teams, and implement algorithmic solutions in C++ or Python.',
-      driveType: 'ON_CAMPUS',
-      eligibilityCgpa: 8.0,
-      eligibleBranches: ['Computer Science', 'Information Technology', 'Electronics'],
-      maxBacklogs: 0,
-      minTenthPercent: 75.0,
-      minTwelfthPercent: 75.0,
-      batchYear: 2026,
-      ctcLpa: 24.5,
-      location: 'Bangalore / Hybrid',
-      deadline: new Date(Date.now() + 14 * 24 * 3600 * 1000),
-      driveDate: new Date(Date.now() + 20 * 24 * 3600 * 1000),
-      status: 'ACTIVE',
-      createdById: admin.id,
-    },
-  });
-
-  await prisma.placementDrive.upsert({
-    where: { id: 'drive-microsoft-sde' },
-    update: {},
-    create: {
-      id: 'drive-microsoft-sde',
-      companyName: 'Microsoft',
-      role: 'Software Development Engineer',
-      description: 'Build enterprise cloud native applications on Azure, high-throughput microservices, and AI-assisted workflows.',
-      driveType: 'ON_CAMPUS',
-      eligibilityCgpa: 7.5,
-      eligibleBranches: ['Computer Science', 'Information Technology'],
-      maxBacklogs: 0,
-      minTenthPercent: 70.0,
-      minTwelfthPercent: 70.0,
-      batchYear: 2026,
-      ctcLpa: 18.0,
-      location: 'Hyderabad / On-site',
-      deadline: new Date(Date.now() + 21 * 24 * 3600 * 1000),
-      driveDate: new Date(Date.now() + 28 * 24 * 3600 * 1000),
-      status: 'ACTIVE',
-      createdById: teacher.id,
-    },
-  });
-
-  await prisma.placementDrive.upsert({
-    where: { id: 'drive-amazon-sde' },
-    update: {},
-    create: {
-      id: 'drive-amazon-sde',
-      companyName: 'Amazon',
-      role: 'Associate SDE - Off Campus',
-      description: 'National recruitment drive for graduating batches with strong problem-solving skills, object-oriented design, and system architecture fundamentals.',
-      driveType: 'OFF_CAMPUS',
-      eligibilityCgpa: 6.5,
-      eligibleBranches: ['Computer Science', 'Information Technology', 'Electronics', 'Mechanical'],
-      maxBacklogs: 1,
-      minTenthPercent: 60.0,
-      minTwelfthPercent: 60.0,
-      batchYear: 2026,
-      ctcLpa: 16.0,
-      location: 'Multiple Locations / Remote',
-      deadline: new Date(Date.now() + 30 * 24 * 3600 * 1000),
-      driveDate: new Date(Date.now() + 35 * 24 * 3600 * 1000),
-      status: 'ACTIVE',
-      createdById: admin.id,
-    },
-  });
-
-  await prisma.placementDrive.upsert({
-    where: { id: 'drive-goldman-sachs' },
-    update: {},
-    create: {
-      id: 'drive-goldman-sachs',
-      companyName: 'Goldman Sachs',
-      role: 'Quantitative Analyst / SDE',
-      description: 'High-frequency algorithmic trading desk engineering. Requires stellar academic record and advanced data structures.',
-      driveType: 'ON_CAMPUS',
-      eligibilityCgpa: 9.0, // Alex (8.75) is ineligible for this drive!
-      eligibleBranches: ['Computer Science'],
-      maxBacklogs: 0,
-      minTenthPercent: 85.0,
-      minTwelfthPercent: 85.0,
-      batchYear: 2026,
-      ctcLpa: 32.0,
-      location: 'Bangalore / On-site',
-      deadline: new Date(Date.now() + 10 * 24 * 3600 * 1000),
-      driveDate: new Date(Date.now() + 15 * 24 * 3600 * 1000),
-      status: 'ACTIVE',
-      createdById: admin.id,
-    },
-  });
-
-  // Demo Application for Alex Student
-  await prisma.placementApplication.upsert({
-    where: {
-      driveId_studentId: {
-        driveId: driveGoogle.id,
-        studentId: student.id,
-      },
-    },
-    update: {},
-    create: {
-      driveId: driveGoogle.id,
-      studentId: student.id,
-      status: 'SHORTLISTED',
-      notes: 'Passed initial coding assessment round with top score.',
-    },
+  // Placement cell demo data (drives, profiles, applications)
+  await seedPlacements({
+    adminId: admin.id,
+    teacherId: teacher.id,
+    studentId: student.id,
+    orgId: org.id,
+    studentPasswordHash: studentPassword,
   });
 
   const count = await prisma.user.count();
@@ -919,6 +779,312 @@ async function main() {
   console.log('  teacher@examforge.dev / Teacher123!');
   console.log('  student@examforge.dev / Student123!');
   console.log('  proctor@examforge.dev / Proctor123!');
+}
+
+/* ------------------------------------------------------------- placements */
+
+/**
+ * End of the calendar day `days` from today in IST (23:59:59 +05:30), the
+ * same instant the admin form stores for a date-only deadline entered in India.
+ */
+function istEndOfDay(days: number): Date {
+  const d = new Date(Date.now() + days * 24 * 3600 * 1000);
+  const ist = new Date(d.getTime() + 330 * 60 * 1000);
+  return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), 18, 29, 59, 999));
+}
+
+/** 10:00 IST on the calendar day `days` from today (drive / interview day). */
+function istMorning(days: number): Date {
+  const end = istEndOfDay(days);
+  return new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 4, 30, 0, 0));
+}
+
+/**
+ * Placement demo data: a realistic mix of drives (every status and type, all
+ * using canonical branch names from src/utils/branches.ts), the demo
+ * student's profile, a few classmates so admins see real applicant lists, and
+ * applications across every pipeline stage. Re-running resets these records
+ * to the values below, which also repairs demo data mutated by manual testing.
+ */
+async function seedPlacements(opts: {
+  adminId: string;
+  teacherId: string;
+  studentId: string;
+  orgId: string;
+  studentPasswordHash: string;
+}) {
+  const { adminId, teacherId, studentId, orgId, studentPasswordHash } = opts;
+  const BATCH = 2027;
+
+  const classmates = [
+    {
+      email: 'priya.sharma@examforge.dev', username: 'priya.sharma', fullName: 'Priya Sharma',
+      profile: { rollNumber: 'IT2023-017', phone: '+91 98450 11223', branch: 'Information Technology', cgpa: 8.92,
+        tenthPercentage: 95.2, twelfthPercentage: 93.0, activeBacklogs: 0,
+        skills: ['Java', 'Spring Boot', 'SQL', 'Data Structures & Algorithms', 'AWS'] },
+    },
+    {
+      email: 'rahul.verma@examforge.dev', username: 'rahul.verma', fullName: 'Rahul Verma',
+      profile: { rollNumber: 'EC2023-031', phone: '+91 99001 44556', branch: 'Electronics & Communication', cgpa: 7.24,
+        tenthPercentage: 81.0, twelfthPercentage: 76.4, activeBacklogs: 1,
+        skills: ['C++', 'Embedded C', 'Verilog', 'Python'] },
+    },
+    {
+      email: 'sneha.iyer@examforge.dev', username: 'sneha.iyer', fullName: 'Sneha Iyer',
+      profile: { rollNumber: 'ME2023-008', phone: '+91 97411 78900', branch: 'Mechanical', cgpa: 8.21,
+        tenthPercentage: 90.6, twelfthPercentage: 88.2, activeBacklogs: 0,
+        skills: ['SolidWorks', 'ANSYS', 'MATLAB', 'Python'] },
+    },
+    {
+      email: 'arjun.mehta@examforge.dev', username: 'arjun.mehta', fullName: 'Arjun Mehta',
+      profile: { rollNumber: 'CS2023-002', phone: '+91 98860 33445', branch: 'Computer Science', cgpa: 9.34,
+        tenthPercentage: 97.0, twelfthPercentage: 95.8, activeBacklogs: 0,
+        skills: ['C++', 'Go', 'System Design', 'Distributed Systems', 'Kubernetes'] },
+    },
+  ];
+
+  const studentIds: Record<string, string> = { alex: studentId };
+  for (const c of classmates) {
+    const user = await prisma.user.upsert({
+      where: { email: c.email },
+      update: {},
+      create: {
+        email: c.email,
+        username: c.username,
+        fullName: c.fullName,
+        passwordHash: studentPasswordHash,
+        role: Role.STUDENT,
+        isEmailVerified: true,
+        organizationId: orgId,
+      },
+    });
+    studentIds[c.username] = user.id;
+    const profile = {
+      fullName: c.fullName,
+      ...c.profile,
+      graduationYear: BATCH,
+      resumeUrl: `https://example.com/resumes/${c.username}.pdf`,
+      githubUrl: `https://github.com/${c.username.replace('.', '')}`,
+      linkedinUrl: `https://www.linkedin.com/in/${c.username.replace('.', '-')}`,
+      isVerified: true,
+    };
+    await prisma.placementProfile.upsert({
+      where: { userId: user.id },
+      update: profile,
+      create: { userId: user.id, ...profile },
+    });
+  }
+
+  // The primary demo student. `update` mirrors `create` so a re-seed restores it.
+  const alexProfile = {
+    fullName: 'Alex Student',
+    rollNumber: 'CS2023-042',
+    phone: '+91 98765 43210',
+    branch: 'Computer Science',
+    cgpa: 8.75,
+    tenthPercentage: 92.4,
+    twelfthPercentage: 89.5,
+    activeBacklogs: 0,
+    graduationYear: BATCH,
+    skills: ['React', 'Node.js', 'TypeScript', 'SQL', 'Python'],
+    resumeUrl: 'https://example.com/resumes/alex-student.pdf',
+    githubUrl: 'https://github.com/alexstudent',
+    linkedinUrl: 'https://www.linkedin.com/in/alexstudent',
+    isVerified: true,
+  };
+  await prisma.placementProfile.upsert({
+    where: { userId: studentId },
+    update: alexProfile,
+    create: { userId: studentId, ...alexProfile },
+  });
+
+  const drives = [
+    {
+      id: 'drive-google-sde',
+      companyName: 'Google',
+      role: 'Software Engineer (New Grad)',
+      description:
+        'Design and build scalable distributed systems, collaborate with cross-functional teams and ship algorithmic solutions in C++, Java or Python.\n\nRounds: online assessment, two technical interviews, one Googliness interview.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 8.0,
+      eligibleBranches: ['Computer Science', 'Information Technology', 'Electronics & Communication'],
+      maxBacklogs: 0,
+      minTenthPercent: 75,
+      minTwelfthPercent: 75,
+      ctcLpa: 32.5,
+      location: 'Bengaluru / Hybrid',
+      deadline: istEndOfDay(14),
+      driveDate: istMorning(21),
+      status: 'ACTIVE',
+      createdById: adminId,
+    },
+    {
+      id: 'drive-microsoft-sde',
+      companyName: 'Microsoft',
+      role: 'Software Development Engineer',
+      description:
+        'Build cloud-native services on Azure, high-throughput microservices and AI-assisted developer workflows.\n\nRounds: coding test, group fly round, three interviews.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 7.5,
+      eligibleBranches: ['Computer Science', 'Information Technology', 'Artificial Intelligence & Data Science'],
+      maxBacklogs: 0,
+      minTenthPercent: 70,
+      minTwelfthPercent: 70,
+      ctcLpa: 44.0,
+      location: 'Hyderabad / On-site',
+      deadline: istEndOfDay(21),
+      driveDate: istMorning(28),
+      status: 'ACTIVE',
+      createdById: teacherId,
+    },
+    {
+      id: 'drive-amazon-sde',
+      companyName: 'Amazon',
+      role: 'SDE I - Off Campus Hiring',
+      description:
+        'National hiring drive for the 2027 batch. Strong problem solving, object-oriented design and CS fundamentals expected.',
+      driveType: 'OFF_CAMPUS',
+      eligibilityCgpa: 6.5,
+      eligibleBranches: [
+        'Computer Science', 'Information Technology', 'Electronics & Communication', 'Electrical', 'Mechanical',
+      ],
+      maxBacklogs: 1,
+      minTenthPercent: 60,
+      minTwelfthPercent: 60,
+      ctcLpa: 28.0,
+      location: 'Multiple locations / Remote',
+      deadline: istEndOfDay(30),
+      driveDate: istMorning(36),
+      status: 'ACTIVE',
+      createdById: adminId,
+    },
+    {
+      id: 'drive-goldman-sachs',
+      companyName: 'Goldman Sachs',
+      role: 'Analyst - Engineering (Strats)',
+      description:
+        'Quantitative engineering for trading desks. Requires an excellent academic record and strong data structures and probability.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 9.0, // Alex (8.75) is ineligible: shows the CGPA reason.
+      eligibleBranches: ['Computer Science', 'Information Technology'],
+      maxBacklogs: 0,
+      minTenthPercent: 85,
+      minTwelfthPercent: 85,
+      ctcLpa: 36.0,
+      location: 'Bengaluru / On-site',
+      deadline: istEndOfDay(10),
+      driveDate: istMorning(15),
+      status: 'ACTIVE',
+      createdById: adminId,
+    },
+    {
+      id: 'drive-tata-motors-get',
+      companyName: 'Tata Motors',
+      role: 'Graduate Engineer Trainee',
+      description:
+        'One-year rotational programme across design, manufacturing and quality for core engineering graduates.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 6.0,
+      eligibleBranches: ['Mechanical', 'Electrical', 'Production & Industrial'], // Alex ineligible by branch.
+      maxBacklogs: 0,
+      minTenthPercent: 60,
+      minTwelfthPercent: 60,
+      ctcLpa: 7.5,
+      location: 'Pune / On-site',
+      deadline: istEndOfDay(40),
+      driveDate: istMorning(48),
+      status: 'UPCOMING',
+      createdById: teacherId,
+    },
+    {
+      id: 'drive-deloitte-analyst',
+      companyName: 'Deloitte',
+      role: 'Analyst - Technology Consulting',
+      description: 'Consulting analyst role. Applications closed two days ago; results are being compiled.',
+      driveType: 'OFF_CAMPUS',
+      eligibilityCgpa: 6.5,
+      eligibleBranches: [],
+      maxBacklogs: 2,
+      minTenthPercent: 60,
+      minTwelfthPercent: 60,
+      ctcLpa: 8.0,
+      location: 'Gurugram / Hybrid',
+      deadline: istEndOfDay(-2), // still ACTIVE but past deadline: shows "deadline has passed".
+      driveDate: istMorning(5),
+      status: 'ACTIVE',
+      createdById: adminId,
+    },
+    {
+      id: 'drive-infosys-se',
+      companyName: 'Infosys',
+      role: 'Systems Engineer (Specialist Programmer)',
+      description: 'Mass recruitment drive open to all branches. Results announced.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 6.0,
+      eligibleBranches: [],
+      maxBacklogs: 1,
+      minTenthPercent: 60,
+      minTwelfthPercent: 60,
+      ctcLpa: 9.5,
+      location: 'Mysuru / On-site',
+      deadline: istEndOfDay(-45),
+      driveDate: istMorning(-35),
+      status: 'COMPLETED',
+      createdById: adminId,
+    },
+    {
+      id: 'drive-zoho-mts',
+      companyName: 'Zoho',
+      role: 'Member Technical Staff',
+      description: 'Drive cancelled by the company due to a hiring freeze.',
+      driveType: 'ON_CAMPUS',
+      eligibilityCgpa: 7.0,
+      eligibleBranches: ['Computer Science', 'Information Technology'],
+      maxBacklogs: 0,
+      minTenthPercent: null,
+      minTwelfthPercent: null,
+      ctcLpa: 12.0,
+      location: 'Chennai / On-site',
+      deadline: istEndOfDay(7),
+      driveDate: istMorning(12),
+      status: 'CANCELLED',
+      createdById: teacherId,
+    },
+  ];
+
+  for (const { id, ...data } of drives) {
+    const fields = { ...data, batchYear: BATCH };
+    await prisma.placementDrive.upsert({
+      where: { id },
+      update: fields,
+      create: { id, ...fields },
+    });
+  }
+
+  const applications: Array<[string, string, string, string | null]> = [
+    ['drive-google-sde', 'alex', 'SHORTLISTED', 'Cleared the online assessment with a top-10 score.'],
+    ['drive-amazon-sde', 'alex', 'APPLIED', null],
+    ['drive-infosys-se', 'alex', 'SELECTED', 'Offer letter issued: Specialist Programmer, 9.5 LPA.'],
+    ['drive-google-sde', 'priya.sharma', 'INTERVIEWED', 'Technical rounds done; awaiting hiring committee.'],
+    ['drive-microsoft-sde', 'priya.sharma', 'APPLIED', null],
+    ['drive-infosys-se', 'priya.sharma', 'SELECTED', 'Offer accepted.'],
+    ['drive-amazon-sde', 'rahul.verma', 'SHORTLISTED', 'Online assessment cleared.'],
+    ['drive-infosys-se', 'rahul.verma', 'REJECTED', 'Did not clear the technical interview.'],
+    ['drive-deloitte-analyst', 'rahul.verma', 'APPLIED', null],
+    ['drive-amazon-sde', 'sneha.iyer', 'APPLIED', null],
+    ['drive-infosys-se', 'sneha.iyer', 'SELECTED', 'Offer letter issued.'],
+    ['drive-google-sde', 'arjun.mehta', 'APPLIED', null],
+    ['drive-goldman-sachs', 'arjun.mehta', 'SHORTLISTED', 'Shortlisted for the quant interview.'],
+    ['drive-microsoft-sde', 'arjun.mehta', 'INTERVIEWED', null],
+  ];
+  for (const [driveId, who, status, notes] of applications) {
+    const sid = studentIds[who];
+    await prisma.placementApplication.upsert({
+      where: { driveId_studentId: { driveId, studentId: sid } },
+      update: { status, notes },
+      create: { driveId, studentId: sid, status, notes },
+    });
+  }
 }
 
 main()

@@ -3,9 +3,8 @@ import { logger } from '../utils/logger.js';
 
 /**
  * Thin client for any OpenAI-compatible chat completions endpoint. The default
- * points at a local Ollama server running a pretrained open model, so the AI
- * features work offline with no API key; LLM_BASE_URL / LLM_MODEL / LLM_API_KEY
- * can instead target a hosted provider (OpenAI, Groq, Gemini's OpenAI endpoint).
+ * is OpenRouter (LLM_API_KEY required); LLM_BASE_URL / LLM_MODEL can instead point
+ * at a local Ollama server or another hosted provider.
  *
  * Every caller treats a null result as "model unavailable" and falls back to the
  * built-in engine, so a missing or slow model never breaks a request.
@@ -26,7 +25,12 @@ interface CompletionOptions {
 // After a connection failure, skip the model for a short while instead of making
 // every request wait on a dead endpoint.
 const RETRY_AFTER_MS = 30_000;
+const TIMEOUT_COOLDOWN_MS = 15_000;
+// Rate limited (OpenRouter free tier: ~20/min, 50/day): back off before retrying.
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
 let unavailableUntil = 0;
+
+const isOpenRouter = () => /openrouter\.ai/.test(env.LLM_BASE_URL);
 
 export function llmEnabled(): boolean {
   return env.LLM_ENABLED && Date.now() >= unavailableUntil;
@@ -42,6 +46,8 @@ async function complete(messages: ChatMessage[], opts: CompletionOptions): Promi
     max_tokens: opts.maxTokens ?? 1024,
     stream: false,
   };
+  // Reasoning models would spend the small token budgets thinking; answer directly.
+  if (isOpenRouter()) body.reasoning = { enabled: false };
   if (opts.schema) {
     body.response_format = {
       type: 'json_schema',
@@ -55,11 +61,13 @@ async function complete(messages: ChatMessage[], opts: CompletionOptions): Promi
       headers: {
         'Content-Type': 'application/json',
         ...(env.LLM_API_KEY ? { Authorization: `Bearer ${env.LLM_API_KEY}` } : {}),
+        ...(isOpenRouter() ? { 'HTTP-Referer': env.FRONTEND_URL, 'X-Title': 'ExamForge' } : {}),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(env.LLM_TIMEOUT_MS),
     });
     if (!res.ok) {
+      if (res.status === 429 || res.status === 402) unavailableUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
       logger.warn(`[llm] ${res.status} from model endpoint: ${(await res.text()).slice(0, 200)}`);
       return null;
     }
@@ -68,10 +76,14 @@ async function complete(messages: ChatMessage[], opts: CompletionOptions): Promi
     return content || null;
   } catch (err) {
     const cause = (err as { cause?: { code?: string } }).cause?.code;
+    const timedOut = (err as Error).name === 'TimeoutError';
     if (cause === 'ECONNREFUSED' || cause === 'ENOTFOUND' || cause === 'EAI_AGAIN') {
       unavailableUntil = Date.now() + RETRY_AFTER_MS;
+    } else if (timedOut) {
+      // A hung model would otherwise stall every later call in the same request.
+      unavailableUntil = Date.now() + TIMEOUT_COOLDOWN_MS;
     }
-    logger.warn(`[llm] request failed: ${(err as Error).name === 'TimeoutError' ? 'timed out' : cause ?? (err as Error).message}`);
+    logger.warn(`[llm] request failed: ${timedOut ? 'timed out' : cause ?? (err as Error).message}`);
     return null;
   }
 }

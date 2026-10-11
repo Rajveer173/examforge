@@ -1,7 +1,16 @@
 import { prisma } from '../config/database.js';
 import { AppError } from '../utils/errors.js';
 import type { ChatMessage } from './llm.js';
-import { adviseOnAttempt, classifyIntent, generateQuestionsWithModel, recommendStudy, tutorReply, type Intent } from './ai.model.js';
+import { staffSnapshot, studentWorkload } from './ai.live.js';
+import {
+  adviseOnAttempt,
+  answerFromData,
+  classifyIntent,
+  generateQuestionsWithModel,
+  recommendStudy,
+  roleGroup,
+  tutorReply,
+} from './ai.model.js';
 
 export async function createConversation(userId: string, input: { title?: string; topic?: string; courseId?: string }) {
   return prisma.aIConversation.create({
@@ -35,8 +44,25 @@ export async function deleteConversation(id: string, userId: string) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Built-in Intelligence Engine Helpers                                        */
+/* Assistant: role-scoped answers                                             */
 /* -------------------------------------------------------------------------- */
+
+/*
+ * Access policy. It is enforced here, in code, by the caller's role; the model
+ * only picks among intents the role is allowed (see ai.model.ts) and never sees
+ * records it could leak.
+ *
+ * - STUDENT: rows of that student only (own attempts and answers, own placement
+ *   profile and applications) plus the public list of open placement drives.
+ * - TEACHER: student records (STUDENT accounts only), and results, answers and
+ *   proctoring limited to tests they created; placement drives. No user
+ *   directory, staff accounts or audit logs.
+ * - ADMIN / ORG_ADMIN: everything, including user accounts and the audit log.
+ * - PROCTOR: proctoring sessions only.
+ *
+ * Every query uses an explicit `select` for user fields, so password hashes,
+ * 2FA secrets and tokens are never loaded, let alone shown.
+ */
 
 interface UserContext {
   id: string;
@@ -45,657 +71,750 @@ interface UserContext {
   role: string;
 }
 
-const has = (q: string, words: string[]) => words.some((w) => q.includes(w));
+const studentName = { fullName: true, username: true } as const;
+const nameOf = (u: { fullName: string | null; username: string }) => u.fullName || u.username;
+const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ').trim();
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const fmtPct = (v: unknown) => (v == null ? '-' : `${Math.round(Number(v) * 10) / 10}%`);
+const fmtNum = (v: unknown) => (v == null ? '-' : `${Math.round(Number(v) * 100) / 100}`);
+const fmtDate = (d: Date | string) =>
+  new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
 
-/** Keyword routing: the fallback when the model is offline, and a hint for it. */
-function keywordIntent(q: string, role: string): Intent {
-  if (isGreeting(q)) return 'greeting';
-  if (role === 'STUDENT') {
-    if (has(q, ['admin', 'teacher', 'instructor', 'faculty', 'staff', 'other student', 'all students', 'audit log', 'password', 'secret', 'credential', 'token', 'system info'])) return 'restricted';
-    if (has(q, ['placement', 'eligible', 'eligibility', 'drive', 'hiring', 'on campus', 'off campus', 'company', 'my application'])) return 'placements';
-    if (has(q, ['my result', 'my score', 'how did i do', 'my performance', 'what should i study', 'weak', 'mistake', 'my test'])) return 'my_results';
-    return 'general';
+function attemptState(a: { status: string; passed: boolean | null }) {
+  if (a.status === 'IN_PROGRESS') return '⏳ In progress';
+  if (a.status === 'EVALUATED') return a.passed === true ? '✅ Passed' : a.passed === false ? '❌ Failed' : 'Evaluated';
+  if (a.status === 'SUBMITTED') return '🕓 Awaiting evaluation';
+  return a.status.replace(/_/g, ' ').toLowerCase();
+}
+
+/** Tests whose title appears in the message, so "results for DSA Quiz" narrows to it. */
+function mentionedTests<T extends { title: string }>(q: string, tests: T[]) {
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const text = ` ${clean(q)} `;
+  return tests.filter((t) => clean(t.title).length >= 3 && text.includes(` ${clean(t.title)} `));
+}
+
+function restrictedReply(role: string) {
+  switch (roleGroup(role)) {
+    case 'STUDENT':
+      return `🔒 **Access restricted**\n\nI can only show **your own** data: your test results and mistakes, your placement profile, applications and eligibility, and the list of open placement drives.\n\nRecords of other students, teachers or administrators, user lists, audit logs and credentials are not available to students.\n\nTry _"show my results"_ or _"am I eligible for <company>?"_.`;
+    case 'TEACHER':
+      return `🔒 **Access restricted**\n\nAs a **teacher** you can view student records, results, answers and proctoring for the tests you created, and placement drives.\n\nStaff and administrator accounts, user counts, audit logs and credentials are only available to administrators.`;
+    case 'PROCTOR':
+      return `🔒 **Access restricted**\n\nAs a **proctor** you can view proctoring sessions, flags and suspicion scores. Results, answers, student records, placements, user accounts and audit logs are not available to proctors.`;
+    default:
+      return `🔒 **Not available**\n\nPasswords, password hashes, secret keys and tokens are never shown, not even to administrators. To give someone access again, reset their password from the **Users** page.`;
   }
-  if (has(q, ['audit', 'activity log', 'who did'])) return 'audit';
-  if (has(q, ['user account', 'all users', 'list users', 'how many users', 'teachers', 'admins', 'staff list'])) return 'users';
-  if (has(q, ['password', 'credential', 'secret', 'token'])) return 'restricted';
-  if (has(q, ['placement', 'drive', 'hiring', 'applicant', 'placed'])) return 'placements';
-  if (has(q, ['proctor', 'cheat', 'suspicion', 'violation'])) return 'proctoring';
-  if (has(q, ['answer', 'what did', 'student response', 'submission', 'question breakdown', 'per question'])) return 'answers';
-  if (has(q, ['result', 'performance', 'score', 'pass rate', 'fail', 'average', 'highest', 'lowest'])) return 'results';
-  if (has(q, ['student record', 'dossier', 'profile of', 'records for', 'lookup', 'search student', 'student'])) return 'student_records';
-  if (has(q, ['generate', 'create question', 'mcq', 'quiz'])) return 'generate_questions';
-  return 'general';
 }
 
-/** Short openers like "hi" or "what can you do" get the capabilities menu. */
-function isGreeting(query: string) {
-  const q = query.trim().toLowerCase().replace(/[!?.]+$/, '');
-  return q.length < 40 && /^(hi|hello|hey|yo|help|start|menu|good (morning|afternoon|evening)|what can you do)/.test(q);
+function greetingReply(user: UserContext) {
+  const name = user.name || 'there';
+  switch (roleGroup(user.role)) {
+    case 'STUDENT':
+      return `### 🎓 Hi ${name}!\n\nI'm your ExamForge study assistant. You can ask me:\n\n- **Your results**: _"show my results"_, _"what should I study next?"_, _"mera result dikhao"_\n- **Placements**: _"am I eligible for Google?"_, _"show open placement drives"_, _"my applications"_\n- **Concepts**: _"explain closures in JavaScript"_, _"difference between SQL and NoSQL"_\n- **Coding help**: _"give me hints for Two Sum"_\n- **Study plans**: _"6-week DSA roadmap"_\n\nI can only see your own records, never other students' or staff data.`;
+    case 'PROCTOR':
+      return `### 🛡️ Hi ${name}!\n\nAs a proctor you can ask me:\n\n- _"show flagged proctoring sessions"_\n- _"who has the highest suspicion score?"_\n- general questions about invigilation and exam integrity.`;
+    case 'TEACHER':
+    case 'ADMIN': {
+      const admin = roleGroup(user.role) === 'ADMIN';
+      return `### 👋 Hi ${name}!\n\nHere is what I can answer from ${admin ? 'platform' : 'your'} records:\n\n- **Results**: _"show results${admin ? '' : ' for my tests'}"_, _"how many students passed?"_, _"struggling students"_\n- **Student records**: _"list students"_, _"records for <name or email>"_\n- **Answers**: _"what did students answer on question 2?"_, _"which questions had the lowest accuracy?"_\n- **Proctoring**: _"show proctoring flags"_\n- **Placements**: _"placement statistics"_, _"active drives"_\n${admin ? '- **Users & audit**: _"how many teachers are there?"_, _"show the audit log"_\n' : ''}- **Question drafting**: _"create 5 MCQs on SQL joins"_\n\nAnything else (concepts, lesson plans, rubrics) I answer as a general assistant.${admin ? '' : '\n\nResults, answers and proctoring cover the tests you created.'}`;
+    }
+  }
 }
 
-/**
- * Handle Admin and Teacher queries:
- * 1. Test performance summaries and class statistics
- * 2. Detailed student answers for questions
- * 3. Question generation and curriculum insights
- * 4. Proctoring and suspicion analysis
- */
-async function handleStaffQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
+/* ------------------------------ student data ------------------------------ */
+
+export interface EligibilityProfile {
+  cgpa: number;
+  branch: string | null;
+  activeBacklogs: number;
+  tenthPercentage: number | null;
+  twelfthPercentage: number | null;
+  graduationYear: number | null;
+}
+
+export interface EligibilityDrive {
+  eligibilityCgpa: number;
+  eligibleBranches: unknown;
+  maxBacklogs: number | null;
+  minTenthPercent: number | null;
+  minTwelfthPercent: number | null;
+  batchYear: number | null;
+  deadline: Date | string;
+}
+
+/** Same rules as the placement portal; returns why the student is not eligible (empty = eligible). */
+export function driveEligibility(profile: EligibilityProfile, drive: EligibilityDrive): string[] {
+  const reasons: string[] = [];
+  if (drive.eligibilityCgpa > 0 && profile.cgpa < drive.eligibilityCgpa) {
+    reasons.push(`needs CGPA ${drive.eligibilityCgpa} (yours: ${profile.cgpa})`);
+  }
+  const branches = Array.isArray(drive.eligibleBranches) ? (drive.eligibleBranches as string[]) : [];
+  if (branches.length > 0 && (!profile.branch || !branches.includes(profile.branch))) {
+    reasons.push(`open to ${branches.join(', ')} (yours: ${profile.branch || 'not set'})`);
+  }
+  if (drive.maxBacklogs != null && profile.activeBacklogs > drive.maxBacklogs) {
+    reasons.push(`max ${drive.maxBacklogs} active backlogs (yours: ${profile.activeBacklogs})`);
+  }
+  if (drive.minTenthPercent && profile.tenthPercentage && profile.tenthPercentage < drive.minTenthPercent) {
+    reasons.push(`needs ${drive.minTenthPercent}% in 10th (yours: ${profile.tenthPercentage}%)`);
+  }
+  if (drive.minTwelfthPercent && profile.twelfthPercentage && profile.twelfthPercentage < drive.minTwelfthPercent) {
+    reasons.push(`needs ${drive.minTwelfthPercent}% in 12th (yours: ${profile.twelfthPercentage}%)`);
+  }
+  if (drive.batchYear && profile.graduationYear && profile.graduationYear !== drive.batchYear) {
+    reasons.push(`for the ${drive.batchYear} batch (yours: ${profile.graduationYear})`);
+  }
+  return reasons;
+}
+
+async function studentPlacements(query: string, user: UserContext) {
   const q = query.toLowerCase();
-  const intent = await classifyIntent(query, history, user.role, keywordIntent(q, user.role));
-  // Teachers see results, answers and proctoring for their own tests; admins see all.
-  const ownTests = user.role === 'TEACHER' ? { createdById: user.id } : {};
+  const [profile, drives, applications] = await Promise.all([
+    prisma.placementProfile.findUnique({ where: { userId: user.id } }),
+    prisma.placementDrive.findMany({ where: { status: { in: ['UPCOMING', 'ACTIVE'] } }, orderBy: { deadline: 'asc' } }),
+    prisma.placementApplication.findMany({
+      where: { studentId: user.id },
+      include: { drive: { select: { id: true, companyName: true, role: true, status: true } } },
+      orderBy: { appliedAt: 'desc' },
+    }),
+  ]);
+  const appByDrive = new Map(applications.map((a) => [a.driveId, a]));
+  const now = Date.now();
 
-  // 1. Placement Drives & Placement Cell Management (Admin / Teacher)
-  if (intent === 'placements') {
-    const drives = await prisma.placementDrive.findMany({
-      include: {
-        applications: {
-          include: {
-            student: { select: { fullName: true, username: true, email: true } },
-          },
+  let res = `### 💼 Placements\n\n`;
+  if (profile) {
+    res += `**Your profile**: ${profile.branch || 'branch not set'} · CGPA **${profile.cgpa}** · ${profile.activeBacklogs} active backlog${profile.activeBacklogs === 1 ? '' : 's'}${profile.graduationYear ? ` · batch ${profile.graduationYear}` : ''}\n\n`;
+  } else {
+    res += `⚠️ You haven't filled in your **placement profile** yet, so I can't check eligibility. Open **Placements → Profile** and add your CGPA, branch and backlogs.\n\n`;
+  }
+
+  // "Am I eligible for Google?" focuses on that company.
+  const named = drives.filter((d) => q.includes(d.companyName.toLowerCase()));
+  const asked = /eligib\w*\s+(?:for|in)\s+([a-z0-9&.\- ]{2,30}?)(?:\?|$|\s+(?:drive|company|placement|role|ka|ke|ki|hu|hoon))/i.exec(query)?.[1]?.trim();
+  if (asked && named.length === 0 && !/^(any|the|this|that|it|placements?|drives?|companies)$/i.test(asked)) {
+    res += `There is no open drive from **${asked}** right now.${drives.length ? ' Here are the drives that are open:' : ''}\n\n`;
+  }
+  const shown = named.length ? named : drives;
+
+  if (drives.length === 0) {
+    res += `There are no open or upcoming placement drives at the moment.\n`;
+  } else {
+    res += `| Company | Role | Type | Min CGPA | Package | Deadline | You |\n| :--- | :--- | :---: | :---: | :---: | :---: | :--- |\n`;
+    for (const d of shown) {
+      const app = appByDrive.get(d.id);
+      let you: string;
+      if (app) you = `📝 Applied (${app.status})`;
+      else if (new Date(d.deadline).getTime() < now) you = '⌛ Deadline passed';
+      else if (!profile) you = '⚠️ Complete profile';
+      else {
+        const reasons = driveEligibility(profile, d);
+        you = reasons.length ? `❌ Not eligible: ${reasons.join('; ')}` : '✅ Eligible';
+      }
+      res += `| **${cell(d.companyName)}** | ${cell(d.role)} | ${d.driveType.replace('_', '-').toLowerCase()} | ${d.eligibilityCgpa || 'Any'} | ${d.ctcLpa ? `${d.ctcLpa} LPA` : '-'} | ${fmtDate(d.deadline)} | ${cell(you)} |\n`;
+    }
+  }
+
+  const otherApps = applications.filter((a) => !shown.some((d) => d.id === a.driveId));
+  if (otherApps.length) {
+    res += `\n#### Your other applications\n\n| Company | Role | Status | Applied |\n| :--- | :--- | :---: | :---: |\n`;
+    for (const a of otherApps.slice(0, 10)) {
+      res += `| ${cell(a.drive.companyName)} | ${cell(a.drive.role)} | ${a.status} | ${fmtDate(a.appliedAt)} |\n`;
+    }
+  }
+  res += `\nApply from the **Placements** page.`;
+  return res;
+}
+
+async function studentResults(user: UserContext) {
+  const attempts = await prisma.attempt.findMany({
+    where: { studentId: user.id },
+    select: {
+      id: true,
+      status: true,
+      score: true,
+      percentage: true,
+      passed: true,
+      startedAt: true,
+      submittedAt: true,
+      test: { select: { title: true, totalMarks: true } },
+      answers: {
+        select: {
+          isCorrect: true,
+          option: { select: { text: true } },
+          question: { select: { text: true, topic: true, explanation: true } },
         },
       },
-      orderBy: { deadline: 'desc' },
+    },
+    orderBy: { startedAt: 'desc' },
+    take: 20,
+  });
+
+  if (attempts.length === 0) {
+    const assigned = await prisma.testAssignment.findMany({
+      where: {
+        OR: [{ studentId: user.id }, { class: { students: { some: { studentId: user.id } } } }],
+        test: { status: 'PUBLISHED' },
+      },
+      select: { test: { select: { id: true, title: true, durationMinutes: true, totalMarks: true } } },
+      take: 10,
     });
-
-    const registeredProfilesCount = await prisma.placementProfile.count();
-    const totalApplicationsCount = await prisma.placementApplication.count();
-    const placedStudents = await prisma.placementApplication.count({
-      where: { status: 'SELECTED' },
-    });
-
-    let res = `### 🏢 Campus Placement Cell Management\n\n`;
-    res += `| Metric | Platform Value |\n`;
-    res += `| :--- | :--- |\n`;
-    res += `| **Registered Students (POD)** | ${registeredProfilesCount} |\n`;
-    res += `| **Total Drives Hosted** | ${drives.length} |\n`;
-    res += `| **Total Applications** | ${totalApplicationsCount} |\n`;
-    res += `| **Selected / Placed Students** | **${placedStudents}** |\n\n`;
-
-    if (drives.length === 0) {
-      res += `_No placement drives created yet. You can create new on-campus or off-campus drives from the Placements dashboard._`;
-      return res;
+    const tests = [...new Map(assigned.map((a) => [a.test.id, a.test])).values()].slice(0, 5);
+    let msg = `### 🎯 Your results\n\nYou haven't attempted any tests yet, so there are no results to show.`;
+    if (tests.length) {
+      msg += `\n\n**Tests assigned to you:**\n${tests.map((t) => `- **${t.title}** (${t.durationMinutes} min, ${fmtNum(t.totalMarks)} marks)`).join('\n')}\n\nTake one from **My Tests** and ask me again for a review of your answers.`;
     }
+    return msg;
+  }
 
-    res += `#### 📋 Placement Drives Status\n\n`;
-    res += `| Company | Role | Type | Status | Min CGPA | Package | Applicants |\n`;
-    res += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+  const finished = attempts.filter((a) => a.status !== 'IN_PROGRESS');
+  const evaluated = attempts.filter((a) => a.status === 'EVALUATED');
+  const inProgress = attempts.length - finished.length;
+  const passed = evaluated.filter((a) => a.passed === true).length;
+  const failed = evaluated.filter((a) => a.passed === false).length;
+  const average = avg(evaluated.filter((a) => a.percentage != null).map((a) => Number(a.percentage)));
 
-    for (const d of drives) {
-      const ctc = d.ctcLpa ? `${d.ctcLpa} LPA` : '-';
-      res += `| **${d.companyName}** | ${d.role} | ${d.driveType} | \`${d.status}\` | ${d.eligibilityCgpa || 'Open'} | ${ctc} | **${d.applications.length}** |\n`;
+  let res = `### 🎯 Your results\n\n`;
+  const summary = [`**${finished.length}** submitted`];
+  if (evaluated.length) summary.push(`**${evaluated.length}** evaluated (${passed} passed, ${failed} failed)`, `average **${average ?? '-'}%**`);
+  if (finished.length > evaluated.length) summary.push(`${finished.length - evaluated.length} awaiting evaluation`);
+  if (inProgress) summary.push(`${inProgress} in progress`);
+  res += `${summary.join(' · ')}\n\n`;
+
+  res += `| Test | Score | % | Result | Date |\n| :--- | :---: | :---: | :--- | :---: |\n`;
+  for (const a of attempts.slice(0, 8)) {
+    const graded = a.status === 'EVALUATED';
+    res += `| ${cell(a.test.title)} | ${graded && a.score != null ? `${fmtNum(a.score)}/${fmtNum(a.test.totalMarks)}` : '-'} | ${graded ? fmtPct(a.percentage) : '-'} | ${attemptState(a)} | ${fmtDate(a.submittedAt ?? a.startedAt)} |\n`;
+  }
+
+  // Topic accuracy over every graded answer of every submitted attempt.
+  const topics = new Map<string, { correct: number; total: number }>();
+  for (const a of finished) {
+    for (const ans of a.answers) {
+      if (ans.isCorrect == null) continue;
+      const t = ans.question.topic || 'General';
+      const s = topics.get(t) ?? { correct: 0, total: 0 };
+      s.total += 1;
+      if (ans.isCorrect) s.correct += 1;
+      topics.set(t, s);
     }
+  }
+  const weak = [...topics]
+    .map(([topic, s]) => ({ topic, ...s, acc: Math.round((s.correct / s.total) * 100) }))
+    .filter((t) => t.acc < 70)
+    .sort((a, b) => a.acc - b.acc)
+    .slice(0, 4);
 
+  const latest = finished.find((a) => a.answers.some((x) => x.isCorrect != null));
+  if (!latest) {
+    res += `\nNone of your answers have been graded yet, so there is nothing to review. Check back after your teacher evaluates ${finished.length ? 'your submission' : 'it'}.`;
     return res;
   }
 
-  // 2. Student Records & Dossier Lookup (Admin / Teacher)
-  if (intent === 'student_records') {
-    const students = await prisma.user.findMany({
-      where: { role: 'STUDENT' },
-      include: {
-        placementProfile: true,
-        attempts: {
-          include: { test: true },
-          orderBy: { startedAt: 'desc' },
-        },
-        placementApplications: {
-          include: { drive: true },
-          orderBy: { appliedAt: 'desc' },
-        },
+  const missed = latest.answers.filter((x) => x.isCorrect === false);
+  const pending = latest.answers.filter((x) => x.isCorrect == null).length;
+  res += `\n#### Latest graded test: ${latest.test.title}\n\n`;
+  if (missed.length) {
+    res += `You got **${missed.length}** question${missed.length === 1 ? '' : 's'} wrong:\n\n`;
+    for (const m of missed.slice(0, 5)) {
+      res += `- **${m.question.topic || 'General'}**: ${clip(cell(m.question.text), 160)}\n`;
+      if (m.option?.text) res += `  - Your answer: ${clip(cell(m.option.text), 100)}\n`;
+      if (m.question.explanation) res += `  - Why: ${clip(cell(m.question.explanation), 220)}\n`;
+    }
+    if (missed.length > 5) res += `- …and ${missed.length - 5} more. Open the test in **Results** for the full review.\n`;
+  } else {
+    res += `Every graded answer was correct. 🎉\n`;
+  }
+  if (pending) res += `\n${pending} answer${pending === 1 ? ' is' : 's are'} still awaiting manual grading.\n`;
+
+  if (weak.length) {
+    res += `\n#### What to study next\n\n`;
+    for (const t of weak) res += `- **${t.topic}**: ${t.correct}/${t.total} correct (${t.acc}%). Revise it and practise a few questions on it.\n`;
+  } else if (topics.size) {
+    res += `\nNo weak topics so far: every topic is at 70% or better. Try harder questions or a new topic next.`;
+  }
+  return res;
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  SINGLE: 'Single-choice MCQ',
+  MULTIPLE: 'Multi-select MCQ',
+  TRUE_FALSE: 'True / false',
+  FILL_BLANK: 'Fill in the blank',
+  MATCH: 'Match the following',
+  CODING: 'Coding',
+  SUBJECTIVE: 'Subjective',
+};
+const label = (k: string) => TYPE_LABEL[k] ?? k.charAt(0) + k.slice(1).toLowerCase().replace(/_/g, ' ');
+const breakdown = (o: Record<string, number>) =>
+  Object.entries(o).length ? Object.entries(o).map(([k, v]) => `${label(k)} **${v}**`).join(' · ') : 'none';
+
+/** Built-in rendering of a student's workload, used when the model is offline. */
+function renderWorkload(w: Awaited<ReturnType<typeof studentWorkload>>) {
+  const s = w.summary;
+  const open = (o: Record<string, number>, ...keys: string[]) => keys.reduce((n, k) => n + (o[k] ?? 0), 0);
+  let res = `### 📋 Your pending work\n\n| | Pending | Done |\n| :--- | :---: | :---: |\n`;
+  res += `| Tests | **${open(s.testsByState, 'pending', 'in_progress', 'upcoming')}** | ${open(s.testsByState, 'completed')} |\n`;
+  res += `| Assignments | **${open(s.assignmentsByState, 'pending', 'overdue')}** | ${open(s.assignmentsByState, 'submitted', 'graded')} |\n`;
+  res += `| Coding problems | **${open(s.codingByState, 'not_started', 'attempted')}** | ${open(s.codingByState, 'solved')} |\n\n`;
+  const tests = w.tests.filter((t) => ['pending', 'in_progress', 'upcoming'].includes(t.state));
+  if (tests.length) {
+    res += `#### Tests to take\n\n| Test | Due | Questions |\n| :--- | :--- | :--- |\n`;
+    for (const t of tests) {
+      res += `| **${cell(t.title)}**${t.state === 'in_progress' ? ' (in progress)' : ''} | ${t.dueAt ?? 'no deadline'} | ${breakdown(t.questionTypes)} |\n`;
+    }
+  }
+  const asg = w.assignments.filter((a) => a.state === 'pending' || a.state === 'overdue');
+  if (asg.length) {
+    res += `\n#### Assignments\n\n| Assignment | Due | Status |\n| :--- | :--- | :---: |\n`;
+    for (const a of asg) res += `| **${cell(a.title)}** | ${a.dueAt ?? 'no deadline'} | ${a.state} |\n`;
+  }
+  if (Object.keys(s.openCodingByDifficulty).length) {
+    res += `\n**Coding problems left by difficulty:** ${breakdown(s.openCodingByDifficulty)}\n`;
+  }
+  return res;
+}
+
+async function studentWork(query: string, user: UserContext, history: ChatMessage[]) {
+  const work = await studentWorkload(user.id);
+  const reply = await answerFromData(user, query, history, work, "this student's own assigned tests, assignments and coding problems");
+  return reply ?? renderWorkload(work);
+}
+
+/** Built-in rendering of the live staff snapshot, used when the model is offline. */
+function renderSnapshot(d: Awaited<ReturnType<typeof staffSnapshot>>) {
+  const rows = (o: Record<string, number>) => Object.entries(o).map(([k, v]) => `| ${label(k)} | **${v}** |`).join('\n');
+  const st = d.students;
+  let res = `### 📊 Live overview\n\n_${d.scope}, as of ${d.generatedAt}_\n\n`;
+  if ('accounts' in d && d.accounts) {
+    res += `| Accounts by role | |\n| :--- | :---: |\n${rows(d.accounts.byRole)}\n| Total | **${d.accounts.total}** |\n\n`;
+  }
+  res += `| Students | |\n| :--- | :---: |\n| Total | **${st.total}** |\n`;
+  res += `| Graduated (before ${new Date().getFullYear()}) | **${st.graduated}** |\n| Graduating this year | **${st.graduatingThisYear}** |\n`;
+  res += `| Graduating later | ${st.graduatingLater} |\n| No graduation year on record | ${st.graduationYearUnknown} |\n| Average CGPA | ${st.averageCgpa ?? '-'} |\n\n`;
+  if (Object.keys(st.byBranch).length) res += `| Branch | Students |\n| :--- | :---: |\n${rows(st.byBranch)}\n\n`;
+  res += `| Tests & practice | |\n| :--- | :---: |\n${rows(d.tests.byStatus)}\n| Submitted attempts | **${d.tests.submittedAttempts}** |\n`;
+  res += `| Pass rate | ${d.tests.passRatePercent ?? '-'}% |\n| Assignments awaiting grading | **${d.assignments.awaitingGrading}** |\n\n`;
+  if (Object.keys(d.questionBank.byType).length) res += `**Question bank:** ${breakdown(d.questionBank.byType)}\n\n`;
+  res += `**Placements:** ${d.placements.studentsPlaced} students placed · drives ${breakdown(d.placements.drivesByStatus)}`;
+  return res;
+}
+
+async function staffLiveStats(query: string, user: UserContext, history: ChatMessage[]) {
+  const data = await staffSnapshot({ id: user.id, admin: roleGroup(user.role) === 'ADMIN' });
+  const reply = await answerFromData(user, query, history, data, `platform statistics (${data.scope})`);
+  return reply ?? renderSnapshot(data);
+}
+
+async function handleStudentQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null) {
+  const intent = await classifyIntent(query, history, user.role);
+  // Every data branch below reads only this student's rows, so the role
+  // boundary does not depend on the routing being right.
+  if (intent === 'restricted') return restrictedReply(user.role);
+  if (intent === 'greeting') return greetingReply(user);
+  if (intent === 'placements') return studentPlacements(query, user);
+  if (intent === 'my_work') return studentWork(query, user, history);
+  if (intent === 'my_results') return studentResults(user);
+
+  const reply = await tutorReply(user, history, topic);
+  if (reply) return reply;
+  return offlineTutor(query) ?? greetingReply(user);
+}
+
+/** Built-in answers for when the model is offline. */
+function offlineTutor(query: string): string | null {
+  const q = query.toLowerCase();
+  if (/\b(roadmap|study plan|how to learn|curriculum|learning path|where to start)\b/.test(q)) return generateRoadmap(query);
+  if (/\b(two sum|reverse string|binary search|code problem|algorithm|leetcode|hints?)\b/.test(q)) return generateCodingTutorHelp(query);
+  if (/\b(explain|what is|what are|difference between|closures?|promises?|async|react|javascript|python|sql)\b/.test(q)) {
+    return generateConceptExplanation(query);
+  }
+  return null;
+}
+
+/* ------------------------------- staff data ------------------------------- */
+
+const NAME_STOPWORDS = new Set(
+  'show list find lookup look search records record profile profiles dossier details detail info about for of the a an me student students all give tell get please display who is are what how many with and their data'.split(' '),
+);
+
+async function staffStudentRecords(query: string, user: UserContext) {
+  const q = query.toLowerCase();
+  const teacher = user.role === 'TEACHER';
+  const students = await prisma.user.findMany({
+    where: { role: 'STUDENT' },
+    select: {
+      id: true,
+      fullName: true,
+      username: true,
+      email: true,
+      isActive: true,
+      createdAt: true,
+      placementProfile: {
+        select: { branch: true, cgpa: true, rollNumber: true, phone: true, skills: true, activeBacklogs: true, graduationYear: true, resumeUrl: true },
       },
-      take: 20,
+      _count: { select: { attempts: teacher ? { where: { test: { createdById: user.id } } } : true } },
+    },
+    orderBy: [{ fullName: 'asc' }, { username: 'asc' }],
+    take: 500,
+  });
+
+  if (students.length === 0) return `### 👥 Students\n\nThere are no student accounts yet.`;
+
+  // A specific student: full name, email or username first, then a unique name part.
+  const words = q.split(/[^a-z0-9@._-]+/).filter((w) => w.length >= 3 && !NAME_STOPWORDS.has(w));
+  let matches = students.filter((s) => {
+    const name = (s.fullName || '').toLowerCase();
+    return (name.length >= 3 && q.includes(name)) || q.includes(s.email.toLowerCase()) || words.includes(s.username.toLowerCase());
+  });
+  if (matches.length === 0 && words.length) {
+    matches = students.filter((s) => (s.fullName || '').toLowerCase().split(/\s+/).some((part) => words.includes(part)));
+  }
+
+  if (matches.length === 1) {
+    const s = matches[0];
+    const attempts = await prisma.attempt.findMany({
+      where: { studentId: s.id, ...(teacher ? { test: { createdById: user.id } } : {}) },
+      select: { status: true, score: true, percentage: true, passed: true, startedAt: true, submittedAt: true, test: { select: { title: true, totalMarks: true } } },
+      orderBy: { startedAt: 'desc' },
+      take: 10,
     });
-
-    if (students.length === 0) {
-      return `### 👥 Student Records & Dossiers\n\nNo student accounts have been created in the system yet.`;
-    }
-
-    // Check if query targets a specific student
-    const matched = students.find((s) => {
-      const name = (s.fullName || s.username).toLowerCase();
-      const email = s.email.toLowerCase();
-      return q.includes(name) || q.includes(email) || (s.username && q.includes(s.username.toLowerCase()));
+    const applications = await prisma.placementApplication.findMany({
+      where: { studentId: s.id },
+      select: { status: true, appliedAt: true, drive: { select: { companyName: true, role: true } } },
+      orderBy: { appliedAt: 'desc' },
+      take: 10,
     });
+    const evaluated = attempts.filter((a) => a.status === 'EVALUATED');
+    const p = s.placementProfile;
 
-    if (matched) {
-      const p = matched.placementProfile;
-      const totalAttempts = matched.attempts.length;
-      const evaluated = matched.attempts.filter((a) => a.status === 'EVALUATED');
-      const passed = evaluated.filter((a) => a.passed === true);
-      const avgScore = evaluated.length > 0
-        ? Math.round(evaluated.reduce((acc, a) => acc + Number(a.percentage || 0), 0) / evaluated.length)
-        : 0;
-
-      let res = `### 👤 Student Dossier: **${matched.fullName || matched.username}**\n\n`;
-      res += `- **Email**: \`${matched.email}\` | **Username**: \`${matched.username}\` | **Status**: ${matched.isActive ? 'Active' : 'Inactive'}\n`;
-      res += `- **Joined**: ${new Date(matched.createdAt).toLocaleDateString()}\n\n`;
-
-      res += `#### 💼 Placement Profile (POD)\n`;
-      if (p) {
-        res += `- **Branch**: ${p.branch || 'N/A'} | **CGPA**: **${p.cgpa}**\n`;
-        res += `- **Roll Number**: ${p.rollNumber || 'N/A'} | **Phone**: ${p.phone || 'N/A'}\n`;
-        res += `- **Skills**: ${Array.isArray(p.skills) ? (p.skills as string[]).join(', ') : 'None listed'}\n`;
-        if (p.resumeUrl) res += `- **Resume**: [Link](${p.resumeUrl})\n`;
-        if (p.githubUrl) res += `- **GitHub**: [Link](${p.githubUrl})\n`;
-        if (p.linkedinUrl) res += `- **LinkedIn**: [Link](${p.linkedinUrl})\n`;
-      } else {
-        res += `_Placement profile not registered yet._\n`;
-      }
-
-      res += `\n#### 📊 Academic Performance\n`;
-      res += `- **Total Tests Taken**: ${totalAttempts} | **Passed**: ${passed.length} | **Average Score**: **${avgScore}%**\n\n`;
-      if (matched.attempts.length > 0) {
-        res += `| Test | Score | Percentage | Status | Date |\n`;
-        res += `| :--- | :---: | :---: | :---: | :---: |\n`;
-        for (const att of matched.attempts.slice(0, 5)) {
-          const passBadge = att.passed === true ? '✅ Pass' : att.passed === false ? '❌ Fail' : '⏳ In Progress';
-          res += `| ${att.test.title} | ${att.score ?? '-'}/${att.test.totalMarks} | ${att.percentage ?? '-'}% | ${passBadge} | ${new Date(att.startedAt).toLocaleDateString()} |\n`;
-        }
-      }
-
-      if (matched.placementApplications.length > 0) {
-        res += `\n#### 🏢 Placement Applications\n`;
-        res += `| Company | Role | Application Status | Applied On |\n`;
-        res += `| :--- | :--- | :---: | :---: |\n`;
-        for (const app of matched.placementApplications) {
-          res += `| ${app.drive.companyName} | ${app.drive.role} | **${app.status}** | ${new Date(app.appliedAt).toLocaleDateString()} |\n`;
-        }
-      }
-
-      return res;
+    let res = `### 👤 ${nameOf(s)}\n\n`;
+    res += `- **Email**: ${s.email} · **Username**: ${s.username} · **Account**: ${s.isActive ? 'active' : 'inactive'} · joined ${fmtDate(s.createdAt)}\n`;
+    if (p) {
+      const skills = Array.isArray(p.skills) && p.skills.length ? (p.skills as string[]).join(', ') : 'none listed';
+      res += `- **Placement profile**: ${p.branch || 'branch not set'} · CGPA **${p.cgpa}** · ${p.activeBacklogs} backlogs${p.graduationYear ? ` · batch ${p.graduationYear}` : ''}${p.rollNumber ? ` · roll ${p.rollNumber}` : ''}\n`;
+      res += `- **Skills**: ${skills}${p.resumeUrl ? ` · [Resume](${p.resumeUrl})` : ''}\n`;
+    } else {
+      res += `- **Placement profile**: not filled in\n`;
     }
 
-    // General list of students
-    let res = `### 👥 Student Directory & Academic Overview\n\n`;
-    res += `Total Registered Students: **${students.length}**\n\n`;
-    res += `| Student Name | Email | Tests Taken | Avg Score | CGPA | POD Status |\n`;
-    res += `| :--- | :--- | :---: | :---: | :---: |\n`;
-
-    for (const s of students) {
-      const name = s.fullName || s.username;
-      const attCount = s.attempts.length;
-      const evaluated = s.attempts.filter((a) => a.status === 'EVALUATED');
-      const avg = evaluated.length > 0
-        ? `${Math.round(evaluated.reduce((acc, a) => acc + Number(a.percentage || 0), 0) / evaluated.length)}%`
-        : '-';
-      const cgpa = s.placementProfile ? `${s.placementProfile.cgpa}` : '-';
-      const podStatus = s.placementProfile ? '✅ Registered' : '⚠️ Missing';
-
-      res += `| **${name}** | \`${s.email}\` | ${attCount} | ${avg} | ${cgpa} | ${podStatus} |\n`;
+    res += `\n#### Tests${teacher ? ' (yours)' : ''}\n\n`;
+    if (attempts.length === 0) {
+      res += `No attempts${teacher ? ' on your tests' : ''} yet.\n`;
+    } else {
+      const passed = evaluated.filter((a) => a.passed === true).length;
+      res += `${attempts.length} attempt${attempts.length === 1 ? '' : 's'} · ${evaluated.length} evaluated · ${passed} passed · average **${avg(evaluated.filter((a) => a.percentage != null).map((a) => Number(a.percentage))) ?? '-'}%**\n\n`;
+      res += `| Test | Score | % | Result | Date |\n| :--- | :---: | :---: | :--- | :---: |\n`;
+      for (const a of attempts) {
+        const graded = a.status === 'EVALUATED';
+        res += `| ${cell(a.test.title)} | ${graded && a.score != null ? `${fmtNum(a.score)}/${fmtNum(a.test.totalMarks)}` : '-'} | ${graded ? fmtPct(a.percentage) : '-'} | ${attemptState(a)} | ${fmtDate(a.submittedAt ?? a.startedAt)} |\n`;
+      }
     }
 
-    res += `\n> 💡 **Tip**: Ask _"Show records for [Student Name]"_ or _"Show profile of student@example.com"_ to view full individual dossiers, test breakdown, and placement applications.`;
+    if (applications.length) {
+      res += `\n#### Placement applications\n\n| Company | Role | Status | Applied |\n| :--- | :--- | :---: | :---: |\n`;
+      for (const a of applications) res += `| ${cell(a.drive.companyName)} | ${cell(a.drive.role)} | ${a.status} | ${fmtDate(a.appliedAt)} |\n`;
+    }
     return res;
   }
 
-  // 3. All Answers / Question-level analysis
-  if (intent === 'answers') {
-    const tests = await prisma.test.findMany({
-      where: ownTests,
-      include: {
-        testQuestions: {
-          include: {
-            question: {
-              include: {
-                options: true,
-                attemptAnswers: {
-                  include: {
-                    attempt: { include: { student: true } },
-                    option: true,
-                  },
-                },
+  let res = '';
+  let list = students;
+  if (matches.length > 1) {
+    res += `Several students match; ask again with the full name or email.\n\n`;
+    list = matches;
+  }
+  const profiles = students.filter((s) => s.placementProfile).length;
+  res = `### 👥 Students\n\n**${students.length}** student account${students.length === 1 ? '' : 's'} · ${profiles} with a placement profile\n\n${res}`;
+  res += `| Name | Email | ${teacher ? 'Attempts on your tests' : 'Attempts'} | CGPA | Branch |\n| :--- | :--- | :---: | :---: | :--- |\n`;
+  for (const s of list.slice(0, 25)) {
+    res += `| **${cell(nameOf(s))}** | ${s.email} | ${s._count.attempts} | ${s.placementProfile?.cgpa ?? '-'} | ${cell(s.placementProfile?.branch || '-')} |\n`;
+  }
+  if (list.length > 25) res += `\n…and ${list.length - 25} more.`;
+  res += `\n\nAsk _"records for <name or email>"_ for one student's full record.`;
+  return res;
+}
+
+async function staffResults(query: string, user: UserContext) {
+  const own = user.role === 'TEACHER' ? { createdById: user.id } : {};
+  const tests = await prisma.test.findMany({
+    where: own,
+    select: { id: true, title: true, totalMarks: true, passingMarks: true },
+  });
+  if (tests.length === 0) {
+    return `### 📊 Results\n\n${user.role === 'TEACHER' ? "You haven't created any tests yet" : 'No tests exist yet'}, so there are no results.`;
+  }
+  const focus = mentionedTests(query, tests);
+  const scope = focus.length ? focus : tests;
+  const attempts = await prisma.attempt.findMany({
+    where: { testId: { in: scope.map((t) => t.id) } },
+    select: {
+      status: true,
+      score: true,
+      percentage: true,
+      passed: true,
+      startedAt: true,
+      submittedAt: true,
+      testId: true,
+      student: { select: studentName },
+    },
+    orderBy: { startedAt: 'desc' },
+    take: 2000,
+  });
+  const scopeLabel = focus.length ? focus.map((t) => `**${t.title}**`).join(', ') : user.role === 'TEACHER' ? 'your tests' : 'all tests';
+
+  if (attempts.length === 0) return `### 📊 Results: ${scopeLabel}\n\nNo student has attempted ${focus.length ? 'this test' : 'these tests'} yet.`;
+
+  const evaluated = attempts.filter((a) => a.status === 'EVALUATED');
+  const awaiting = attempts.filter((a) => a.status === 'SUBMITTED').length;
+  const inProgress = attempts.filter((a) => a.status === 'IN_PROGRESS').length;
+  const passed = evaluated.filter((a) => a.passed === true);
+  const failed = evaluated.filter((a) => a.passed === false);
+  const scores = evaluated.filter((a) => a.percentage != null).map((a) => Number(a.percentage));
+
+  let res = `### 📊 Results: ${scopeLabel}\n\n| Metric | Value |\n| :--- | :--- |\n`;
+  res += `| Attempts | ${attempts.length} (${evaluated.length} evaluated, ${awaiting} awaiting evaluation, ${inProgress} in progress) |\n`;
+  if (evaluated.length) {
+    res += `| Passed / failed | **${passed.length}** / ${failed.length} (pass rate **${Math.round((passed.length / Math.max(passed.length + failed.length, 1)) * 100)}%**) |\n`;
+    res += `| Average | **${avg(scores) ?? '-'}%** |\n| Highest / lowest | ${scores.length ? `${Math.max(...scores)}% / ${Math.min(...scores)}%` : '-'} |\n`;
+  }
+
+  if (scope.length > 1) {
+    res += `\n#### By test\n\n| Test | Attempts | Evaluated | Avg % | Pass rate |\n| :--- | :---: | :---: | :---: | :---: |\n`;
+    for (const t of scope) {
+      const ta = attempts.filter((a) => a.testId === t.id);
+      if (!ta.length) continue;
+      const te = ta.filter((a) => a.status === 'EVALUATED');
+      const tp = te.filter((a) => a.passed === true).length;
+      const tScores = te.filter((a) => a.percentage != null).map((a) => Number(a.percentage));
+      res += `| ${cell(t.title)} | ${ta.length} | ${te.length} | ${avg(tScores) ?? '-'} | ${te.length ? `${Math.round((tp / te.length) * 100)}%` : '-'} |\n`;
+    }
+  }
+
+  const titleOf = new Map(tests.map((t) => [t.id, t]));
+  res += `\n#### Recent attempts\n\n| Student | Test | Score | % | Result |\n| :--- | :--- | :---: | :---: | :--- |\n`;
+  for (const a of attempts.slice(0, 10)) {
+    const t = titleOf.get(a.testId)!;
+    const graded = a.status === 'EVALUATED';
+    res += `| ${cell(nameOf(a.student))} | ${cell(t.title)} | ${graded && a.score != null ? `${fmtNum(a.score)}/${fmtNum(t.totalMarks)}` : '-'} | ${graded ? fmtPct(a.percentage) : '-'} | ${attemptState(a)} |\n`;
+  }
+
+  if (failed.length) {
+    res += `\n#### Needs attention\n\n`;
+    for (const f of failed.slice(0, 8)) {
+      const t = titleOf.get(f.testId)!;
+      res += `- **${nameOf(f.student)}**: ${fmtPct(f.percentage)} on _${t.title}_ (pass mark ${fmtNum(t.passingMarks)}/${fmtNum(t.totalMarks)})\n`;
+    }
+    if (failed.length > 8) res += `- …and ${failed.length - 8} more.\n`;
+  }
+  return res;
+}
+
+async function staffAnswers(query: string, user: UserContext) {
+  const own = user.role === 'TEACHER' ? { createdById: user.id } : {};
+  const tests = await prisma.test.findMany({
+    where: { ...own, attempts: { some: { status: { in: ['SUBMITTED', 'EVALUATED'] } } } },
+    select: { id: true, title: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (tests.length === 0) {
+    return `### 📝 Answers\n\nNo submitted attempts on ${user.role === 'TEACHER' ? 'your tests' : 'any test'} yet, so there are no answers to review.`;
+  }
+  const focus = mentionedTests(query, tests);
+  const scope = (focus.length ? focus : tests).slice(0, focus.length ? 3 : 2);
+  const qNum = /\b(?:question|q)\s*#?\s*(\d{1,3})\b/i.exec(query)?.[1];
+
+  let res = `### 📝 Answers by question\n\n`;
+  for (const test of scope) {
+    const testQuestions = await prisma.testQuestion.findMany({
+      where: { testId: test.id, ...(qNum ? { orderIndex: Number(qNum) - 1 } : {}) },
+      orderBy: { orderIndex: 'asc' },
+      select: {
+        orderIndex: true,
+        question: {
+          select: {
+            text: true,
+            type: true,
+            explanation: true,
+            options: { where: { isCorrect: true }, select: { text: true } },
+            // Only answers given on this test: a bank question can appear in other teachers' tests.
+            attemptAnswers: {
+              where: { attempt: { testId: test.id, status: { in: ['SUBMITTED', 'EVALUATED'] } } },
+              select: {
+                isCorrect: true,
+                answerJson: true,
+                option: { select: { text: true } },
+                attempt: { select: { student: { select: studentName } } },
               },
             },
           },
-          orderBy: { orderIndex: 'asc' },
         },
       },
-      take: 5,
     });
-
-    if (tests.length === 0) {
-      return `### 📋 Question Answers Overview\n\nNo tests have been created yet on the platform. Once you create a test and students submit attempts, you will see a question-by-question breakdown of every student's answers here.`;
+    res += `#### ${test.title}\n\n`;
+    if (testQuestions.length === 0) {
+      res += qNum ? `This test has no question ${qNum}.\n\n` : `No questions on this test.\n\n`;
+      continue;
     }
-
-    let response = `### 📝 Student Answers & Question Performance\n\n`;
-
-    for (const test of tests) {
-      response += `#### 📖 Test: **${test.title}** (Total Marks: ${test.totalMarks}, Passing: ${test.passingMarks})\n\n`;
-
-      if (test.testQuestions.length === 0) {
-        response += `_No questions linked to this test yet._\n\n`;
-        continue;
-      }
-
-      for (const tq of test.testQuestions) {
-        const question = tq.question;
-        const answers = question.attemptAnswers;
-        const totalAttempts = answers.length;
-        const correctCount = answers.filter((a) => a.isCorrect === true).length;
-        const accuracy = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : 0;
-
-        response += `##### Question ${tq.orderIndex + 1}: ${question.text}\n`;
-        response += `- **Type**: \`${question.type}\` | **Difficulty**: \`${question.difficulty}\` | **Marks**: ${tq.marksOverride ?? question.marks}\n`;
-        response += `- **Accuracy**: **${accuracy}%** (${correctCount}/${totalAttempts} correct answers)\n`;
-
-        if (question.explanation) {
-          response += `- **Expected Answer / Explanation**: _${question.explanation}_\n`;
-        }
-
-        if (answers.length > 0) {
-          response += `\n| Student | Submitted Answer | Status | Marks Awarded |\n`;
-          response += `| :--- | :--- | :---: | :---: |\n`;
-
-          for (const ans of answers) {
-            const studentName = ans.attempt.student.fullName || ans.attempt.student.username;
-            let displayAnswer = 'No answer';
-
-            if (ans.option?.text) {
-              displayAnswer = ans.option.text;
-            } else if (ans.answerJson) {
-              const parsed = ans.answerJson as any;
-              displayAnswer = parsed.text || parsed.code || JSON.stringify(parsed);
-              if (displayAnswer.length > 50) displayAnswer = displayAnswer.slice(0, 47) + '...';
-            }
-
-            const status = ans.isCorrect === true ? '✅ Correct' : ans.isCorrect === false ? '❌ Incorrect' : '⏳ Pending';
-            const marks = ans.marksObtained != null ? `${ans.marksObtained}` : 'Pending';
-
-            response += `| ${studentName} | \`${displayAnswer}\` | ${status} | ${marks} |\n`;
+    for (const tq of testQuestions.slice(0, qNum ? 1 : 10)) {
+      const answers = tq.question.attemptAnswers;
+      const graded = answers.filter((a) => a.isCorrect != null);
+      const correct = graded.filter((a) => a.isCorrect).length;
+      res += `**Q${tq.orderIndex + 1}.** ${clip(cell(tq.question.text), 200)}\n\n`;
+      res += `- Accuracy: **${graded.length ? `${Math.round((correct / graded.length) * 100)}%` : '-'}** (${correct}/${graded.length} graded correct${answers.length > graded.length ? `, ${answers.length - graded.length} awaiting grading` : ''})\n`;
+      const key = tq.question.options.map((o) => o.text).join(', ');
+      if (key) res += `- Correct answer: ${clip(cell(key), 150)}\n`;
+      if (answers.length) {
+        res += `\n| Student | Answer | Result |\n| :--- | :--- | :---: |\n`;
+        for (const a of answers.slice(0, 15)) {
+          let text = a.option?.text ?? '';
+          if (!text && a.answerJson != null) {
+            const v = a.answerJson as Record<string, unknown> | string;
+            text = typeof v === 'string' ? v : String(v.text ?? v.code ?? v.answer ?? JSON.stringify(v));
           }
-          response += `\n`;
-        } else {
-          response += `_No student answers submitted yet for this question._\n\n`;
+          res += `| ${cell(nameOf(a.attempt.student))} | ${clip(cell(text || '(blank)'), 60)} | ${a.isCorrect === true ? '✅' : a.isCorrect === false ? '❌' : '🕓'} |\n`;
         }
+        if (answers.length > 15) res += `\n…and ${answers.length - 15} more answers.\n`;
       }
+      res += `\n`;
     }
-
-    response += `> **💡 Teacher Tip**: Questions with accuracy under 60% may contain common misconceptions or ambiguous phrasing. You can discuss these concepts in the next review session.`;
-    return response;
+    if (!qNum && testQuestions.length > 10) res += `_Showing the first 10 of ${testQuestions.length} questions. Ask about a specific question number for more._\n\n`;
   }
-
-  // 2. Test Results & Overall Performance
-  if (intent === 'results') {
-    const attempts = await prisma.attempt.findMany({
-      where: { test: ownTests },
-      include: {
-        test: true,
-        student: true,
-      },
-      orderBy: { startedAt: 'desc' },
-      take: 50,
-    });
-
-    const tests = await prisma.test.findMany({
-      where: ownTests,
-      include: {
-        _count: { select: { attempts: true } },
-      },
-    });
-
-    if (attempts.length === 0) {
-      return `### 📊 Exam Performance Analytics\n\nNo student attempts have been submitted yet.\n\n- **Active Tests in System**: ${tests.length}\n- **Recommendation**: Ensure tests are set to \`PUBLISHED\` status and assigned to students or class batches so students can take them.`;
-    }
-
-    const totalAttempts = attempts.length;
-    const evaluatedAttempts = attempts.filter((a) => a.status === 'EVALUATED');
-    const passedAttempts = attempts.filter((a) => a.passed === true);
-    const passRate = totalAttempts > 0 ? Math.round((passedAttempts.length / totalAttempts) * 100) : 0;
-
-    const scores = evaluatedAttempts.map((a) => Number(a.percentage || 0));
-    const avgPercentage = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-    const highestScore = scores.length > 0 ? Math.max(...scores) : 0;
-    const lowestScore = scores.length > 0 ? Math.min(...scores) : 0;
-
-    let response = `### 📊 Test Results & Student Performance Summary\n\n`;
-    response += `| Metric | Platform Value |\n`;
-    response += `| :--- | :--- |\n`;
-    response += `| **Total Submissions** | ${totalAttempts} attempts |\n`;
-    response += `| **Evaluated Submissions** | ${evaluatedAttempts.length} |\n`;
-    response += `| **Overall Pass Rate** | **${passRate}%** (${passedAttempts.length} passed) |\n`;
-    response += `| **Average Score** | **${avgPercentage}%** |\n`;
-    response += `| **Highest Score** | ${highestScore}% |\n`;
-    response += `| **Lowest Score** | ${lowestScore}% |\n\n`;
-
-    response += `#### 🎓 Recent Student Submissions\n\n`;
-    response += `| Student | Test Title | Score | % | Status | Time Spent |\n`;
-    response += `| :--- | :--- | :---: | :---: | :---: | :---: |\n`;
-
-    for (const att of attempts.slice(0, 10)) {
-      const studentName = att.student.fullName || att.student.username;
-      const statusBadge = att.passed === true ? '✅ Passed' : att.passed === false ? '❌ Failed' : '⏳ In Progress';
-      const time = att.timeTakenSeconds ? `${Math.round(att.timeTakenSeconds / 60)} min` : '-';
-      const pct = att.percentage != null ? `${att.percentage}%` : '-';
-      const score = att.score != null ? `${att.score}/${att.test.totalMarks}` : '-';
-
-      response += `| ${studentName} | **${att.test.title}** | ${score} | ${pct} | ${statusBadge} | ${time} |\n`;
-    }
-
-    // Flag at-risk students if any
-    const failedStudents = attempts.filter((a) => a.passed === false);
-    if (failedStudents.length > 0) {
-      response += `\n#### ⚠️ Students Needing Attention\n`;
-      for (const f of failedStudents) {
-        response += `- **${f.student.fullName || f.student.username}** scored ${f.percentage}% on _${f.test.title}_ (Passing mark: ${f.test.passingMarks}). Consider assigning remedial practice questions.\n`;
-      }
-    }
-
-    return response;
+  if (!focus.length && tests.length > scope.length) {
+    res += `_Showing the ${scope.length} most recent tests with submissions. Name a test to see its answers: ${tests.slice(scope.length, scope.length + 5).map((t) => t.title).join(', ')}._`;
   }
-
-  // 3. Question Generation / Curriculum Creation
-  if (intent === 'generate_questions') {
-    return (await tutorReply(user, history, topic)) ?? generateSmartQuestionSet(query);
-  }
-
-  // 4. Proctoring & Anti-Cheat Summary
-  if (intent === 'proctoring') {
-    const sessions = await prisma.proctoringSession.findMany({
-      where: user.role === 'TEACHER' ? { test: { createdById: user.id } } : {},
-      orderBy: { suspicionScore: 'desc' },
-      include: {
-        student: true,
-        test: true,
-        events: true,
-      },
-      take: 10,
-    });
-
-    let response = `### 🛡️ Proctoring & Anti-Cheat Security Audit\n\n`;
-    if (sessions.length === 0) {
-      response += `No active or recorded proctoring sessions found. During tests, ExamForge automatically monitors:\n`;
-      response += `- **Tab Switches & Window Blur**\n- **Fullscreen Exit Events**\n- **Copy/Paste & Right-Click Invocations**\n- **Periodic Screen Snapshots**\n\n`;
-      response += `Any anomalies will be flagged with a Suspicion Score here.`;
-      return response;
-    }
-
-    response += `| Student | Test | Suspicion Score | Events Logged | Status |\n`;
-    response += `| :--- | :--- | :---: | :---: | :---: |\n`;
-    for (const s of sessions) {
-      const studentName = s.student.fullName || s.student.username;
-      const testTitle = s.test?.title || 'Unknown Test';
-      const riskBadge = s.suspicionScore > 50 ? '🚨 High Risk' : s.suspicionScore > 20 ? '⚠️ Moderate' : '✅ Clean';
-      response += `| ${studentName} | ${testTitle} | **${s.suspicionScore}** | ${s.events.length} events | ${riskBadge} |\n`;
-    }
-    return response;
-  }
-
-  // Staff boundary: teachers work with student data, not platform accounts or logs.
-  if (intent === 'restricted' || (user.role === 'TEACHER' && (intent === 'users' || intent === 'audit'))) {
-    return `🔒 **Access Restricted**\n\nAs a **${user.role}** you can view student records, results, answers and proctoring for your own tests, and placements. Administrator and staff accounts, audit logs, credentials and system settings are only available to administrators.`;
-  }
-
-  // 8. User directory (Admin)
-  if (intent === 'users') {
-    const [byRole, recent] = await Promise.all([
-      prisma.user.groupBy({ by: ['role'], _count: { _all: true } }),
-      prisma.user.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 15,
-        select: { fullName: true, username: true, email: true, role: true, isActive: true, createdAt: true },
-      }),
-    ]);
-    let res = `### 👥 Platform Users\n\n| Role | Accounts |\n| :--- | :---: |\n`;
-    for (const r of byRole) res += `| ${r.role} | **${r._count._all}** |\n`;
-    res += `\n#### Most recent accounts\n\n| Name | Email | Role | Status | Joined |\n| :--- | :--- | :---: | :---: | :---: |\n`;
-    for (const u of recent) {
-      res += `| ${u.fullName || u.username} | \`${u.email}\` | ${u.role} | ${u.isActive ? 'Active' : 'Inactive'} | ${new Date(u.createdAt).toLocaleDateString()} |\n`;
-    }
-    return res;
-  }
-
-  // 9. Audit trail (Admin)
-  if (intent === 'audit') {
-    const logs = await prisma.auditLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      include: { user: { select: { fullName: true, username: true, role: true } } },
-    });
-    if (logs.length === 0) return `### 🧾 Audit Log\n\nNo audit events have been recorded yet.`;
-    let res = `### 🧾 Audit Log: latest ${logs.length} events\n\n| When | User | Action | Entity |\n| :--- | :--- | :--- | :--- |\n`;
-    for (const l of logs) {
-      const who = l.user ? `${l.user.fullName || l.user.username} (${l.user.role})` : 'System';
-      res += `| ${new Date(l.createdAt).toLocaleString()} | ${who} | \`${l.action}\` | ${l.entity}${l.entityId ? ` \`${l.entityId.slice(0, 8)}\`` : ''} |\n`;
-    }
-    return res;
-  }
-  if (!isGreeting(query)) {
-    const reply = await tutorReply(user, history, topic);
-    if (reply) return reply;
-  }
-
-  // 7. Default Staff Assistant Guidance (greetings, or when the model is offline)
-  return `### 👨‍🏫 ExamForge Staff Assistant
-
-Hello **${user.name || 'Instructor'}**! As a **${user.role}**, here is what I can do for you in real-time:
-
-1. **📊 Performance & Analytics**: Ask _"Show test results and student performance"_, _"What is the average score on JavaScript Fundamentals?"_, or _"List struggling students"_.
-2. **👥 Student Records & Dossiers**: Ask _"Show student records"_, _"Lookup records for Alex Student"_, or _"Find student profile by email"_.
-3. **📝 Inspect All Student Answers**: Ask _"Show all answers for JavaScript Fundamentals"_, _"Which questions had the lowest accuracy?"_, or _"What did students answer on question 1?"_.
-4. **🏢 Placement Cell Insights**: Ask _"How many students registered for placements?"_, _"Show active placement drives"_, or _"List drive applicants"_.
-5. **💡 AI Question Generator**: Ask _"Generate 5 Multiple Choice questions on React Hooks and State Management"_ or _"Create an easy coding challenge on Array manipulation"_.
-6. **🛡️ Proctoring & Integrity Review**: Ask _"Show proctoring session flags and suspicion scores"_.
-
-What would you like to review today?`;
+  return res;
 }
 
-/**
- * Handle Student queries:
- * 1. Comprehensive multi-week learning roadmaps
- * 2. Personal test performance diagnostics & weak-area reviews
- * 3. Programming concept explanations & tutorials
- * 4. Step-by-step coding problem guidance
- * 5. Course and test preparation information
- */
-async function handleStudentQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null): Promise<string> {
-  const q = query.toLowerCase();
-  const intent = await classifyIntent(query, history, user.role, keywordIntent(q, user.role));
-
-  // 0. Security Isolation - Block student access to admin, teacher, staff, other students, system internals
-  const restrictedKeywords = [
-    'admin', 'teacher', 'instructor', 'faculty', 'staff', 'other student',
-    'all students', 'audit log', 'password', 'secret', 'salary', 'credential',
-    'token', 'system info'
-  ];
-
-  const mentionsRestricted = restrictedKeywords.some((kw) => {
-    const regex = new RegExp(`\\b${kw}\\b`, 'i');
-    return regex.test(q);
-  });
-
-  if (intent === 'restricted' || (mentionsRestricted && intent !== 'general' && intent !== 'greeting')) {
-    return `🔒 **Access Restricted**\n\nAs a **Student**, you do not have permission to access Administrator, Teacher, or Faculty records, staff credentials, system audit logs, or records belonging to other students.\n\nIf you need assistance with your personal coursework, test diagnostics, roadmaps, or placement eligibility, feel free to ask!`;
-  }
-
-  // 1. Placement & Campus Hiring Queries (Student)
-  if (intent === 'placements') {
-    const profile = await prisma.placementProfile.findUnique({
-      where: { userId: user.id },
-    });
-
-    const drives = await prisma.placementDrive.findMany({
-      where: { status: { in: ['UPCOMING', 'ACTIVE'] } },
-      orderBy: { deadline: 'asc' },
-    });
-
-    const studentApplications = await prisma.placementApplication.findMany({
-      where: { studentId: user.id },
-    });
-    const appMap = new Map(studentApplications.map((a) => [a.driveId, a]));
-
-    let res = `### 💼 Placement & Campus Hiring Portal\n\n`;
-
-    if (!profile) {
-      res += `⚠️ **Profile Incomplete**: You have not yet registered your **Placement Profile (POD)**. Please navigate to the **Placements** page to fill in your CGPA, Branch, and Skills so you can view your eligibility and apply to drives.\n\n`;
-    } else {
-      res += `**Your Registered Profile**: ${profile.fullName} | Branch: **${profile.branch || 'Not Set'}** | CGPA: **${profile.cgpa}**\n\n`;
-    }
-
-    if (drives.length === 0) {
-      res += `There are currently no active placement drives posted. Please check back soon!`;
-      return res;
-    }
-
-    res += `#### 🏢 Active & Upcoming Drives:\n\n`;
-    res += `| Company | Role | Type | Min CGPA | Package | Deadline | Status / Eligibility |\n`;
-    res += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
-
-    for (const d of drives) {
-      const app = appMap.get(d.id);
-      let eligibility = '✅ Eligible';
-
-      if (app) {
-        eligibility = `📝 Applied (${app.status})`;
-      } else if (!profile) {
-        eligibility = '⚠️ Register Profile';
-      } else {
-        if (d.eligibilityCgpa > 0 && profile.cgpa < d.eligibilityCgpa) {
-          eligibility = `❌ Ineligible (Min ${d.eligibilityCgpa} CGPA)`;
-        }
-        const branches = Array.isArray(d.eligibleBranches) ? (d.eligibleBranches as string[]) : [];
-        if (branches.length > 0 && (!profile.branch || !branches.includes(profile.branch))) {
-          eligibility = `❌ Branch Mismatch`;
-        }
-      }
-
-      const ctc = d.ctcLpa ? `${d.ctcLpa} LPA` : 'Best in Class';
-      const deadlineStr = new Date(d.deadline).toLocaleDateString();
-      res += `| **${d.companyName}** | ${d.role} | ${d.driveType} | ${d.eligibilityCgpa || 'Open'} | ${ctc} | ${deadlineStr} | **${eligibility}** |\n`;
-    }
-
-    res += `\n> 📌 Navigate to the **Placements** portal to view full job descriptions and submit applications.`;
-    return res;
-  }
-
-  // Open-ended questions go to the model; the keyword templates below only answer
-  // when it is offline.
-  if (intent === 'general') {
-    const reply = await tutorReply(user, history, topic);
-    if (reply) return reply;
-  }
-
-  // 2. Learning Roadmaps
-  if (intent === 'general' && (
-    q.includes('roadmap') ||
-    q.includes('study plan') ||
-    q.includes('how to learn') ||
-    q.includes('curriculum') ||
-    q.includes('path') ||
-    q.includes('guide') ||
-    q.includes('step by step') ||
-    q.includes('where to start')
-  )) {
-    return (await tutorReply(user, history, topic)) ?? generateRoadmap(query);
-  }
-
-  // 2. Personal Test Performance & Diagnostic
-  if (intent === 'my_results') {
-    const studentAttempts = await prisma.attempt.findMany({
-      where: { studentId: user.id, status: { in: ['SUBMITTED', 'EVALUATED'] } },
-      include: {
-        test: true,
-        answers: {
-          include: {
-            question: true,
-            option: true,
-          },
-        },
+async function proctoringSummary(user: UserContext) {
+  const where = user.role === 'TEACHER' ? { test: { createdById: user.id } } : {};
+  const [sessions, total, active] = await Promise.all([
+    prisma.proctoringSession.findMany({
+      where,
+      orderBy: { suspicionScore: 'desc' },
+      select: {
+        suspicionScore: true,
+        status: true,
+        startedAt: true,
+        student: { select: studentName },
+        test: { select: { title: true } },
+        _count: { select: { events: true } },
       },
-      orderBy: { startedAt: 'desc' },
-      take: 5,
-    });
+      take: 15,
+    }),
+    prisma.proctoringSession.count({ where }),
+    prisma.proctoringSession.count({ where: { ...where, status: 'ACTIVE' } }),
+  ]);
 
-    if (studentAttempts.length === 0) {
-      const availableTests = await prisma.test.findMany({
-        where: { status: 'PUBLISHED' },
-        take: 3,
-      });
-
-      let msg = `### 🎯 Personal Learning & Performance Diagnostic\n\nYou haven't submitted any tests on ExamForge yet!\n\n`;
-      if (availableTests.length > 0) {
-        msg += `#### 📝 Available Tests You Can Take Now:\n`;
-        for (const t of availableTests) {
-          msg += `- **${t.title}** (${t.durationMinutes} mins, ${t.totalMarks} marks) — _${t.description || 'Practice assessment'}_\n`;
-        }
-        msg += `\nHead over to **My Tests** to attempt an exam, and I will analyze your answers to provide a personalized review plan!`;
-      }
-      return msg;
-    }
-
-    const latest = studentAttempts[0];
-    const totalQuestions = latest.answers.length;
-    const correctAnswers = latest.answers.filter((a) => a.isCorrect === true);
-    const incorrectAnswers = latest.answers.filter((a) => a.isCorrect === false);
-
-    let response = `### 🎯 Personal Diagnostic: **${latest.test.title}**\n\n`;
-    response += `Here is your performance breakdown from your recent submission:\n\n`;
-    response += `| Status | Score | Percentage | Result |\n`;
-    response += `| :---: | :---: | :---: | :---: |\n`;
-    response += `| ${latest.status} | **${latest.score ?? '-'} / ${latest.test.totalMarks}** | **${latest.percentage ?? '-'}%** | ${latest.passed ? '🎉 Passed' : '⚠️ Retake Recommended'} |\n\n`;
-
-    if (incorrectAnswers.length > 0) {
-      response += `#### 🔍 Topics to Strengthen Based on Your Mistakes:\n\n`;
-      for (const ans of incorrectAnswers) {
-        const qText = ans.question.text;
-        const topicName = ans.question.topic || 'Core Concept';
-        response += `- **${topicName}**: Question _"${qText}"_\n`;
-        if (ans.option?.text) {
-          response += `  - Your answer: ~~\`${ans.option.text}\`~~\n`;
-        }
-        if (ans.question.explanation) {
-          response += `  - **Why**: ${ans.question.explanation}\n`;
-        }
-      }
-      response += `\n#### 🚀 Your Targeted 3-Step Study Plan:\n`;
-      response += `1. **Review Theory**: Re-read the module lessons on ${incorrectAnswers.map((a) => a.question.topic || 'the missed topics').filter((v, i, a) => a.indexOf(v) === i).join(', ')}.\n`;
-      response += `2. **Hands-on Practice**: Re-run the coding exercises and solve 3 practice questions on these specific topics.\n`;
-      response += `3. **Retake Exam**: Schedule another attempt once you feel confident to boost your rank on the leaderboard!\n`;
-    } else if (correctAnswers.length === 0) {
-      response += `Your answers for this test have not been graded yet. Check back once your teacher has evaluated it.`;
-    } else {
-      response += `🌟 **Outstanding job!** You answered all evaluated questions correctly! You have mastered this module. Consider moving to the next course topic or attempting intermediate coding challenges.`;
-    }
-
-    return response;
+  let res = `### 🛡️ Proctoring${user.role === 'TEACHER' ? ' (your tests)' : ''}\n\n`;
+  if (sessions.length === 0) {
+    return `${res}No proctoring sessions have been recorded yet. During a proctored test, tab switches, fullscreen exits, copy/paste and periodic snapshots are logged and scored here.`;
   }
-
-  // 3. Coding Problem / Hint Request
-  if (intent === 'general' && (q.includes('two sum') || q.includes('reverse string') || q.includes('binary search') || q.includes('code problem') || q.includes('algorithm'))) {
-    return (await tutorReply(user, history, topic)) ?? generateCodingTutorHelp(query);
+  const flagged = sessions.filter((s) => s.suspicionScore > 20).length;
+  res += `${total} session${total === 1 ? '' : 's'} · ${active} active · ${flagged} of the top ${sessions.length} flagged (score above 20)\n\n`;
+  res += `| Student | Test | Suspicion | Events | Status | Started |\n| :--- | :--- | :---: | :---: | :---: | :---: |\n`;
+  for (const s of sessions) {
+    const risk = s.suspicionScore > 50 ? '🚨' : s.suspicionScore > 20 ? '⚠️' : '✅';
+    res += `| ${cell(nameOf(s.student))} | ${cell(s.test?.title || '-')} | ${risk} **${Math.round(s.suspicionScore)}** | ${s._count.events} | ${s.status.toLowerCase()} | ${fmtDate(s.startedAt)} |\n`;
   }
+  return res;
+}
 
-  // 4. Programming Concept Explanation
-  if (intent === 'general' && (
-    q.includes('explain') ||
-    q.includes('what is') ||
-    q.includes('difference between') ||
-    q.includes('closure') ||
-    q.includes('promise') ||
-    q.includes('async') ||
-    q.includes('react') ||
-    q.includes('javascript') ||
-    q.includes('python') ||
-    q.includes('sql')
-  )) {
-    return (await tutorReply(user, history, topic)) ?? generateConceptExplanation(query);
+async function staffPlacements() {
+  const [drives, profiles, applications, selected] = await Promise.all([
+    prisma.placementDrive.findMany({
+      select: { companyName: true, role: true, driveType: true, status: true, eligibilityCgpa: true, ctcLpa: true, deadline: true, _count: { select: { applications: true } } },
+      orderBy: { deadline: 'desc' },
+      take: 30,
+    }),
+    prisma.placementProfile.count(),
+    prisma.placementApplication.count(),
+    prisma.placementApplication.count({ where: { status: 'SELECTED' } }),
+  ]);
+  let res = `### 🏢 Placements\n\n| Metric | Value |\n| :--- | :--- |\n| Students with a placement profile | ${profiles} |\n| Drives | ${drives.length} (${drives.filter((d) => d.status === 'ACTIVE' || d.status === 'UPCOMING').length} open) |\n| Applications | ${applications} |\n| Selected | **${selected}** |\n\n`;
+  if (drives.length === 0) return `${res}No placement drives yet. Create one from the **Placements** page.`;
+  res += `| Company | Role | Type | Status | Min CGPA | Package | Deadline | Applicants |\n| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
+  for (const d of drives) {
+    res += `| **${cell(d.companyName)}** | ${cell(d.role)} | ${d.driveType.replace('_', '-').toLowerCase()} | ${d.status} | ${d.eligibilityCgpa || 'Any'} | ${d.ctcLpa ? `${d.ctcLpa} LPA` : '-'} | ${fmtDate(d.deadline)} | ${d._count.applications} |\n`;
   }
+  return res;
+}
 
-  // 5. Default Student Assistant Greeting (greetings, or when the model is offline)
-  return `### 🎓 ExamForge AI Study Companion
+async function adminUsers() {
+  const [byRole, recent] = await Promise.all([
+    prisma.user.groupBy({ by: ['role'], _count: { _all: true } }),
+    prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 15,
+      select: { fullName: true, username: true, email: true, role: true, isActive: true, createdAt: true },
+    }),
+  ]);
+  const total = byRole.reduce((n, r) => n + r._count._all, 0);
+  let res = `### 👥 Users\n\n**${total}** accounts\n\n| Role | Accounts |\n| :--- | :---: |\n`;
+  for (const r of byRole.sort((a, b) => b._count._all - a._count._all)) res += `| ${r.role} | **${r._count._all}** |\n`;
+  res += `\n#### Most recent accounts\n\n| Name | Email | Role | Status | Joined |\n| :--- | :--- | :---: | :---: | :---: |\n`;
+  for (const u of recent) {
+    res += `| ${cell(nameOf(u))} | ${u.email} | ${u.role} | ${u.isActive ? 'active' : 'inactive'} | ${fmtDate(u.createdAt)} |\n`;
+  }
+  return res;
+}
 
-Hi **${user.name || 'Student'}**! I am your personal AI tutor and learning advisor. Here is how I can help you succeed:
+async function adminAudit() {
+  const logs = await prisma.auditLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: { action: true, entity: true, entityId: true, createdAt: true, user: { select: { fullName: true, username: true, role: true } } },
+  });
+  if (logs.length === 0) return `### 🧾 Audit log\n\nNo audit events have been recorded yet.`;
+  let res = `### 🧾 Audit log: latest ${logs.length} events\n\n| When | User | Action | Entity |\n| :--- | :--- | :--- | :--- |\n`;
+  for (const l of logs) {
+    const who = l.user ? `${nameOf(l.user)} (${l.user.role})` : 'System';
+    res += `| ${new Date(l.createdAt).toLocaleString('en-IN')} | ${cell(who)} | \`${l.action}\` | ${l.entity}${l.entityId ? ` \`${l.entityId.slice(0, 8)}\`` : ''} |\n`;
+  }
+  return res;
+}
 
-1. **🗺️ Comprehensive Learning Roadmaps**: Ask _"Give me a 6-week roadmap for Full Stack Web Development"_ or _"Data Structures & Algorithms study path"_.
-2. **🎯 Analyze My Test Performance**: Ask _"Review my test results and tell me what to study next"_ to get a personalized diagnostic.
-3. **💡 Concept Explanations**: Ask _"Explain closures and the event loop in JavaScript with code examples"_, or _"What is the difference between SQL and NoSQL?"_.
-4. **💻 Coding Assistance & Hints**: Ask _"Give me hints for Two Sum or Binary Search without giving away the full code"_.
-5. **💼 Placement Drives & Eligibility**: Ask _"Am I eligible for Google or Microsoft?"_ or _"Show on-campus placement drives"_.
-6. **📚 Course Navigation**: Ask _"What lessons and assignments are available in CS101?"_.
+async function handleStaffQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null) {
+  // Intents arrive already scoped to the role: a teacher asking for users or the
+  // audit log gets 'restricted' here, whether routed by keywords or the model.
+  const intent = await classifyIntent(query, history, user.role);
+  const admin = roleGroup(user.role) === 'ADMIN';
 
-What topic or challenge would you like to conquer today?`;
+  switch (intent) {
+    case 'restricted':
+      return restrictedReply(user.role);
+    case 'greeting':
+      return greetingReply(user);
+    case 'placements':
+      return staffPlacements();
+    case 'live_stats':
+      return staffLiveStats(query, user, history);
+    case 'student_records':
+      return staffStudentRecords(query, user);
+    case 'answers':
+      return staffAnswers(query, user);
+    case 'results':
+      return staffResults(query, user);
+    case 'proctoring':
+      return proctoringSummary(user);
+    case 'users':
+      return admin ? adminUsers() : restrictedReply(user.role);
+    case 'audit':
+      return admin ? adminAudit() : restrictedReply(user.role);
+    case 'generate_questions':
+      return (await tutorReply(user, history, topic)) ?? generateSmartQuestionSet(query);
+    default:
+      return (await tutorReply(user, history, topic)) ?? offlineTutor(query) ?? greetingReply(user);
+  }
+}
+
+async function handleProctorQuery(query: string, user: UserContext, history: ChatMessage[], topic?: string | null) {
+  const intent = await classifyIntent(query, history, user.role);
+  if (intent === 'proctoring') return proctoringSummary(user);
+  if (intent === 'restricted') return restrictedReply(user.role);
+  if (intent === 'greeting') return greetingReply(user);
+  return (await tutorReply(user, history, topic)) ?? greetingReply(user);
 }
 
 /**
@@ -1065,12 +1184,16 @@ export async function sendTutorMessage(userId: string, conversationId: string, c
     role: user.role,
   };
 
-  // Questions about platform records are answered from the database; open-ended
-  // ones go to the model, with the built-in engine as the offline fallback.
+  // Questions about platform records are answered from the database, scoped by
+  // role; open-ended ones go to the model, with built-in answers as the offline
+  // fallback.
+  const group = roleGroup(user.role);
   const reply =
-    user.role === 'ADMIN' || user.role === 'TEACHER' || user.role === 'ORG_ADMIN'
+    group === 'ADMIN' || group === 'TEACHER'
       ? await handleStaffQuery(content, userCtx, history, conv.topic)
-      : await handleStudentQuery(content, userCtx, history, conv.topic);
+      : group === 'PROCTOR'
+        ? await handleProctorQuery(content, userCtx, history, conv.topic)
+        : await handleStudentQuery(content, userCtx, history, conv.topic);
 
   const assistantMsg = await prisma.aIMessage.create({
     data: {
