@@ -182,6 +182,7 @@ export const NAV_BY_ROLE = {
       label: 'Invigilation',
       items: [
         { to: '/proctoring', label: 'Live sessions', icon: Video, end: true },
+        { to: '/proctor/placements', label: 'Placement Assessments', icon: Briefcase },
         { to: '/courses', label: 'Course catalog', icon: Compass },
       ],
     },
@@ -219,6 +220,7 @@ export const QUICK_ACTIONS_BY_ROLE = {
   ],
   PROCTOR: [
     { to: '/proctoring', label: 'Watch live sessions', hint: 'Candidates currently in an exam' },
+    { to: '/proctor/placements', label: 'Invigilate placement tests', hint: 'Online tests & candidate audit flags' },
   ],
 };
 

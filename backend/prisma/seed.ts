@@ -1077,12 +1077,21 @@ async function seedPlacements(opts: {
     ['drive-goldman-sachs', 'arjun.mehta', 'SHORTLISTED', 'Shortlisted for the quant interview.'],
     ['drive-microsoft-sde', 'arjun.mehta', 'INTERVIEWED', null],
   ];
+  // Selection round, test score and proctor verdict follow from the status.
+  const progress: Record<string, { currentRound: string; assessmentScore: number | null; proctorStatus: string }> = {
+    APPLIED: { currentRound: 'Resume Screening', assessmentScore: null, proctorStatus: 'NOT_STARTED' },
+    SHORTLISTED: { currentRound: 'Online Assessment', assessmentScore: 82, proctorStatus: 'IN_PROGRESS' },
+    INTERVIEWED: { currentRound: 'Technical Interview', assessmentScore: 88.5, proctorStatus: 'CLEARED' },
+    SELECTED: { currentRound: 'Offer Released', assessmentScore: 94.5, proctorStatus: 'CLEARED' },
+    REJECTED: { currentRound: 'Technical Interview', assessmentScore: 61, proctorStatus: 'CLEARED' },
+  };
   for (const [driveId, who, status, notes] of applications) {
     const sid = studentIds[who];
+    const fields = { status, notes, ...progress[status] };
     await prisma.placementApplication.upsert({
       where: { driveId_studentId: { driveId, studentId: sid } },
-      update: { status, notes },
-      create: { driveId, studentId: sid, status, notes },
+      update: fields,
+      create: { driveId, studentId: sid, ...fields },
     });
   }
 }

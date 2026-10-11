@@ -49,6 +49,9 @@ const LABELS: Record<string, string> = {
   driveDate: 'Drive date',
   status: 'Status',
   notes: 'Notes',
+  selectionProcess: 'Selection rounds',
+  currentRound: 'Current round',
+  assessmentScore: 'Assessment score',
 };
 
 /** Parse a body and turn Zod issues into one readable 400 ("CGPA: must be at most 10"). */
@@ -156,6 +159,7 @@ const driveFields = {
   location: optText(200),
   deadline: dateInput,
   driveDate: z.preprocess((v) => (v === '' ? null : v), dateInput.nullable().optional()),
+  selectionProcess: z.array(z.string().trim().min(1).max(100), { invalid_type_error: 'must be a list of rounds' }).max(10).optional(),
   status: z.enum(['UPCOMING', 'ACTIVE', 'COMPLETED', 'CANCELLED'], {
     errorMap: () => ({ message: 'must be UPCOMING, ACTIVE, COMPLETED or CANCELLED' }),
   }),
@@ -176,12 +180,18 @@ const updateDriveSchema = z.object({
   status: driveFields.status.optional(),
 });
 
-const statusSchema = z.object({
-  status: z.enum(['APPLIED', 'SHORTLISTED', 'INTERVIEWED', 'SELECTED', 'REJECTED'], {
-    errorMap: () => ({ message: 'must be one of APPLIED, SHORTLISTED, INTERVIEWED, SELECTED, REJECTED' }),
-  }),
-  notes: optText(2000),
-});
+const statusSchema = z
+  .object({
+    status: z
+      .enum(['APPLIED', 'SHORTLISTED', 'INTERVIEWED', 'SELECTED', 'REJECTED'], {
+        errorMap: () => ({ message: 'must be one of APPLIED, SHORTLISTED, INTERVIEWED, SELECTED, REJECTED' }),
+      })
+      .optional(),
+    currentRound: optText(100),
+    assessmentScore: optNumber(0, 100),
+    notes: optText(2000),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), 'Nothing to update');
 
 /* ---------------------------------------------------------------- routes */
 
@@ -281,12 +291,72 @@ placementRouter.get('/applications', requireRole('STUDENT'), asyncHandler(async 
 }));
 
 /**
- * PATCH /api/placements/applications/:id/status - Update application status (Admin/Teacher)
+ * PATCH /api/placements/applications/:id/status - Update application status and round (Admin/Teacher)
  */
 placementRouter.patch('/applications/:id/status', requireRole(...MANAGERS), asyncHandler(async (req, res) => {
-  const { status, notes } = parseBody(statusSchema, req.body);
-  const application = await placementService.updateApplicationStatus(req.params.id, status, notes);
+  const input = parseBody(statusSchema, req.body);
+  const application = await placementService.updateApplicationStatus(req.params.id, input);
   res.json({ success: true, data: { application } });
+}));
+
+/**
+ * GET /api/placements/profiles - List all registered student POD profiles (Admin/Teacher)
+ */
+placementRouter.get('/profiles', requireRole(...MANAGERS), asyncHandler(async (req, res) => {
+  const { branch, verified, search } = req.query;
+  const profiles = await placementService.getAllProfiles({
+    branch: branch as string | undefined,
+    verified: verified !== undefined ? verified === 'true' : undefined,
+    search: search as string | undefined,
+  });
+  res.json({ success: true, data: { profiles } });
+}));
+
+/**
+ * PATCH /api/placements/profiles/:id/verify - Verify or flag student profile (Admin/Teacher)
+ */
+placementRouter.patch('/profiles/:id/verify', requireRole(...MANAGERS), asyncHandler(async (req, res) => {
+  const schema = z.object({
+    isVerified: z.boolean(),
+  });
+  const { isVerified } = schema.parse(req.body);
+  const profile = await placementService.verifyProfile(req.params.id, isVerified, req.user!.id);
+  res.json({ success: true, data: { profile } });
+}));
+
+/**
+ * GET /api/placements/proctor/candidates - Placement test assessment candidates (Proctor/Admin/Teacher)
+ */
+placementRouter.get('/proctor/candidates', requireRole('PROCTOR', 'ADMIN', 'TEACHER'), asyncHandler(async (req, res) => {
+  const { driveId, proctorStatus, search } = req.query;
+  const candidates = await placementService.getProctorCandidates({
+    driveId: driveId as string | undefined,
+    proctorStatus: proctorStatus as string | undefined,
+    search: search as string | undefined,
+  });
+  res.json({ success: true, data: { candidates } });
+}));
+
+/**
+ * PATCH /api/placements/proctor/candidates/:id - Update proctor verification status (Proctor)
+ */
+placementRouter.patch('/proctor/candidates/:id', requireRole('PROCTOR', 'ADMIN', 'TEACHER'), asyncHandler(async (req, res) => {
+  const schema = z.object({
+    proctorStatus: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'CLEARED', 'FLAGGED', 'DISQUALIFIED']),
+    proctorNotes: z.string().optional(),
+    assessmentScore: z.coerce.number().min(0).max(100).optional(),
+  });
+  const input = schema.parse(req.body);
+  const application = await placementService.updateProctorStatus(req.params.id, input);
+  res.json({ success: true, data: { application } });
+}));
+
+/**
+ * GET /api/placements/proctor/stats - Proctoring stats for placement assessments
+ */
+placementRouter.get('/proctor/stats', requireRole('PROCTOR', 'ADMIN', 'TEACHER'), asyncHandler(async (req, res) => {
+  const stats = await placementService.getProctorStats();
+  res.json({ success: true, data: { stats } });
 }));
 
 /**

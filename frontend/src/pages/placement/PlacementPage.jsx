@@ -938,25 +938,56 @@ export function PlacementPage() {
 
                   {/* Status & Timeline Stepper */}
                   <div className="flex flex-col sm:items-end gap-2">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
-                        app.status === 'SELECTED'
-                          ? 'bg-positive-soft text-positive-ink ring-1 ring-positive/30'
-                          : app.status === 'REJECTED'
-                          ? 'bg-critical-soft text-critical-ink ring-1 ring-critical/30'
-                          : app.status === 'INTERVIEWED' || app.status === 'SHORTLISTED'
-                          ? 'bg-accent-soft text-accent ring-1 ring-accent/30'
-                          : 'bg-canvas text-ink ring-1 ring-line'
-                      }`}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                      {app.status === 'APPLIED' ? 'Applied • Under Review' : app.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
+                          app.status === 'SELECTED'
+                            ? 'bg-positive-soft text-positive-ink ring-1 ring-positive/30'
+                            : app.status === 'REJECTED'
+                            ? 'bg-critical-soft text-critical-ink ring-1 ring-critical/30'
+                            : app.status === 'INTERVIEWED' || app.status === 'SHORTLISTED'
+                            ? 'bg-accent-soft text-accent ring-1 ring-accent/30'
+                            : 'bg-canvas text-ink ring-1 ring-line'
+                        }`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {app.status === 'APPLIED' ? 'In Pipeline' : app.status}
+                      </span>
+
+                      {app.proctorStatus && app.proctorStatus !== 'NOT_STARTED' && (
+                        <Badge
+                          tone={
+                            app.proctorStatus === 'CLEARED'
+                              ? 'positive'
+                              : app.proctorStatus === 'FLAGGED'
+                              ? 'warning'
+                              : app.proctorStatus === 'DISQUALIFIED'
+                              ? 'critical'
+                              : 'blue'
+                          }
+                        >
+                          Assessment: {app.proctorStatus}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="text-right text-[11px] text-ink-muted">
+                      <span>Current Round: </span>
+                      <strong className="text-accent font-semibold">
+                        {app.currentRound || 'Resume Screening'}
+                      </strong>
+                    </div>
+
+                    {app.notes && (
+                      <p className="text-[11px] text-ink-subtle max-w-xs text-right italic">
+                        Coordinator note: "{app.notes}"
+                      </p>
+                    )}
 
                     <button
                       type="button"
                       onClick={() => handleWithdraw(app.driveId)}
-                      className="text-[11px] text-critical-ink hover:underline"
+                      className="text-[11px] text-critical-ink hover:underline self-end"
                     >
                       Withdraw application
                     </button>

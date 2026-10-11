@@ -1030,6 +1030,8 @@ model PlacementProfile {
   githubUrl         String?
   linkedinUrl       String?
   isVerified        Boolean  @default(false)
+  verifiedAt        DateTime?
+  verifiedBy        String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -1053,6 +1055,7 @@ model PlacementDrive {
   deadline         DateTime
   driveDate        DateTime?
   status           String                 @default("UPCOMING") // UPCOMING, ACTIVE, COMPLETED, CANCELLED
+  selectionProcess Json?
   createdById      String
   createdBy        User                   @relation("DriveCreatedBy", fields: [createdById], references: [id])
   applications     PlacementApplication[]
@@ -1065,18 +1068,23 @@ model PlacementDrive {
 }
 
 model PlacementApplication {
-  id        String         @id @default(cuid())
-  driveId   String
-  drive     PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
-  studentId String
-  student   User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  status    String         @default("APPLIED") // APPLIED, SHORTLISTED, INTERVIEWED, SELECTED, REJECTED
-  appliedAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  notes     String?        @db.Text
+  id              String         @id @default(cuid())
+  driveId         String
+  drive           PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status          String         @default("APPLIED") // APPLIED, SHORTLISTED, INTERVIEWED, SELECTED, REJECTED
+  currentRound    String?        @default("Resume Screening") // Resume Screening, Online Assessment, Technical Interview, HR Round, Offer Released
+  assessmentScore Float?
+  proctorStatus   String?        @default("NOT_STARTED") // NOT_STARTED, IN_PROGRESS, CLEARED, FLAGGED, DISQUALIFIED
+  proctorNotes    String?        @db.Text
+  appliedAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  notes           String?        @db.Text
 
   @@unique([driveId, studentId])
   @@index([studentId])
   @@index([driveId])
+  @@index([proctorStatus])
 }
 

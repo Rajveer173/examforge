@@ -44,6 +44,7 @@ export interface CreateDriveInput {
   deadline: string | Date;
   driveDate?: string | Date | null;
   status?: DriveStatus;
+  selectionProcess?: string[];
 }
 
 /** Drives in these states accept applications (subject to the deadline). */
@@ -414,6 +415,9 @@ export class PlacementService {
         deadline,
         driveDate,
         status,
+        selectionProcess: input.selectionProcess?.length
+          ? input.selectionProcess
+          : ['Resume Screening', 'Online Assessment', 'Technical Interview', 'HR Round'],
         createdById,
       },
     });
@@ -446,6 +450,7 @@ export class PlacementService {
       data.driveDate = input.driveDate ? parseDateInput(input.driveDate, 'Drive date', 'driveDate') : null;
     }
     if (input.status !== undefined) data.status = input.status;
+    if (input.selectionProcess !== undefined) data.selectionProcess = input.selectionProcess;
 
     const deadline: Date = data.deadline ?? existing.deadline;
     const driveDate: Date | null = data.driveDate !== undefined ? data.driveDate : existing.driveDate;
@@ -533,20 +538,31 @@ export class PlacementService {
   }
 
   /**
-   * Update application status (Admin/Teacher)
+   * Update application status and round (Admin/Teacher)
    */
-  async updateApplicationStatus(applicationId: string, status: ApplicationStatus, notes?: string | null) {
+  async updateApplicationStatus(
+    applicationId: string,
+    input: {
+      status?: ApplicationStatus;
+      currentRound?: string | null;
+      assessmentScore?: number | null;
+      notes?: string | null;
+    },
+  ) {
     const app = await prisma.placementApplication.findUnique({ where: { id: applicationId } });
     if (!app) {
       throw notFound('Application');
     }
 
+    const data: any = {};
+    if (input.status) data.status = input.status;
+    if (input.currentRound) data.currentRound = input.currentRound;
+    if (input.assessmentScore !== undefined) data.assessmentScore = input.assessmentScore;
+    if (input.notes !== undefined) data.notes = input.notes?.trim() || null;
+
     return prisma.placementApplication.update({
       where: { id: applicationId },
-      data: {
-        status,
-        ...(notes !== undefined ? { notes: notes?.trim() || null } : {}),
-      },
+      data,
       include: {
         student: {
           select: { id: true, fullName: true, username: true, email: true },
@@ -556,6 +572,161 @@ export class PlacementService {
         },
       },
     });
+  }
+
+  /**
+   * Get all registered student POD profiles (Admin/Teacher)
+   */
+  async getAllProfiles(filters?: { branch?: string; verified?: boolean; search?: string }) {
+    const where: any = {};
+    if (filters?.branch && filters.branch !== 'ALL') {
+      where.branch = filters.branch;
+    }
+    if (filters?.verified !== undefined) {
+      where.isVerified = filters.verified;
+    }
+    if (filters?.search) {
+      where.OR = [
+        { fullName: { contains: filters.search } },
+        { rollNumber: { contains: filters.search } },
+        { user: { email: { contains: filters.search } } },
+      ];
+    }
+
+    return prisma.placementProfile.findMany({
+      where,
+      include: {
+        user: {
+          select: { id: true, email: true, username: true, fullName: true, avatarUrl: true },
+        },
+      },
+      orderBy: { cgpa: 'desc' },
+    });
+  }
+
+  /**
+   * Verify or unverify student profile (Admin/Teacher)
+   */
+  async verifyProfile(profileId: string, isVerified: boolean, verifiedBy: string) {
+    const profile = await prisma.placementProfile.findUnique({ where: { id: profileId } });
+    if (!profile) {
+      throw notFound('Placement profile');
+    }
+
+    return prisma.placementProfile.update({
+      where: { id: profileId },
+      data: {
+        isVerified,
+        verifiedAt: isVerified ? new Date() : null,
+        verifiedBy: isVerified ? verifiedBy : null,
+      },
+    });
+  }
+
+  /**
+   * List candidates for assessment proctoring (Proctor / Admin / Teacher)
+   */
+  async getProctorCandidates(filters?: { driveId?: string; proctorStatus?: string; search?: string }) {
+    const where: any = {};
+    if (filters?.driveId && filters.driveId !== 'ALL') {
+      where.driveId = filters.driveId;
+    }
+    if (filters?.proctorStatus && filters.proctorStatus !== 'ALL') {
+      where.proctorStatus = filters.proctorStatus;
+    }
+    if (filters?.search) {
+      where.OR = [
+        { student: { fullName: { contains: filters.search } } },
+        { student: { email: { contains: filters.search } } },
+        { student: { placementProfile: { rollNumber: { contains: filters.search } } } },
+      ];
+    }
+
+    return prisma.placementApplication.findMany({
+      where,
+      include: {
+        drive: {
+          select: { id: true, companyName: true, role: true, driveType: true, driveDate: true, selectionProcess: true },
+        },
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            username: true,
+            placementProfile: true,
+          },
+        },
+      },
+      orderBy: { appliedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Update candidate proctor status (Proctor)
+   */
+  async updateProctorStatus(
+    applicationId: string,
+    input: { proctorStatus: string; proctorNotes?: string; assessmentScore?: number }
+  ) {
+    const app = await prisma.placementApplication.findUnique({ where: { id: applicationId } });
+    if (!app) {
+      throw notFound('Application');
+    }
+
+    const data: any = {
+      proctorStatus: input.proctorStatus,
+    };
+    if (input.proctorNotes !== undefined) data.proctorNotes = input.proctorNotes;
+    if (input.assessmentScore !== undefined) data.assessmentScore = input.assessmentScore;
+
+    if (input.proctorStatus === 'CLEARED') {
+      data.status = 'SHORTLISTED';
+      data.currentRound = 'Technical Interview';
+    } else if (input.proctorStatus === 'DISQUALIFIED') {
+      data.status = 'REJECTED';
+      data.currentRound = 'Disqualified (Malpractice)';
+    }
+
+    return prisma.placementApplication.update({
+      where: { id: applicationId },
+      data,
+      include: {
+        student: {
+          select: { id: true, fullName: true, username: true, email: true },
+        },
+        drive: {
+          select: { id: true, companyName: true, role: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Proctor statistics for placement assessment invigilation
+   */
+  async getProctorStats() {
+    const [
+      totalInvigilated,
+      clearedCount,
+      flaggedCount,
+      disqualifiedCount,
+      activeAssessmentDrives,
+    ] = await Promise.all([
+      prisma.placementApplication.count(),
+      prisma.placementApplication.count({ where: { proctorStatus: 'CLEARED' } }),
+      prisma.placementApplication.count({ where: { proctorStatus: 'FLAGGED' } }),
+      prisma.placementApplication.count({ where: { proctorStatus: 'DISQUALIFIED' } }),
+      prisma.placementDrive.count({ where: { status: 'ACTIVE' } }),
+    ]);
+
+    return {
+      totalInvigilated,
+      clearedCount,
+      flaggedCount,
+      disqualifiedCount,
+      activeAssessmentDrives,
+    };
   }
 
   /**
@@ -580,6 +751,7 @@ export class PlacementService {
       drives,
       applicationGroups,
       placedStudents,
+      branchGroups,
     ] = await Promise.all([
       prisma.placementProfile.count(),
       prisma.placementDrive.findMany({ select: { status: true, driveType: true, ctcLpa: true } }),
@@ -589,6 +761,7 @@ export class PlacementService {
         distinct: ['studentId'],
         select: { studentId: true },
       }),
+      prisma.placementProfile.groupBy({ by: ['branch'], _count: { _all: true } }),
     ]);
 
     const applicationsByStatus: Record<string, number> = {
@@ -599,6 +772,8 @@ export class PlacementService {
 
     const ctcs = drives.map((d) => d.ctcLpa).filter((c): c is number => typeof c === 'number' && c > 0);
     const countStatus = (s: string) => drives.filter((d) => d.status === s).length;
+    const byBranch: Record<string, number> = {};
+    for (const g of branchGroups) byBranch[g.branch || 'General'] = g._count._all;
 
     return {
       totalRegisteredStudents,
@@ -611,6 +786,7 @@ export class PlacementService {
       offCampusDrives: drives.filter((d) => d.driveType === 'OFF_CAMPUS').length,
       totalApplications,
       applicationsByStatus,
+      byBranch,
       selectedCount: applicationsByStatus.SELECTED,
       placedStudents: placedStudents.length,
       averageCtc: ctcs.length ? Math.round((ctcs.reduce((a, b) => a + b, 0) / ctcs.length) * 10) / 10 : null,

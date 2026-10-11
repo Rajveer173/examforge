@@ -64,6 +64,7 @@ const OrganizationsPage = page(() => import('../pages/organizations/Organization
 const SettingsPage = page(() => import('../pages/SettingsPage.jsx'), 'SettingsPage');
 const PlacementPage = page(() => import('../pages/placement/PlacementPage.jsx'), 'PlacementPage');
 const AdminPlacementPage = page(() => import('../pages/placement/AdminPlacementPage.jsx'), 'AdminPlacementPage');
+const ProctorPlacementPage = page(() => import('../pages/placement/ProctorPlacementPage.jsx'), 'ProctorPlacementPage');
 
 export const roleHome = {
   ADMIN: '/admin',
@@ -151,6 +152,7 @@ export function AppRoutes() {
         <Route path="/teacher/placements" element={guard(['TEACHER'], <AdminPlacementPage />)} />
 
         <Route path="/proctoring" element={guard(['PROCTOR', 'ADMIN', 'TEACHER'], <ProctoringDashboard />)} />
+        <Route path="/proctor/placements" element={guard(['PROCTOR', 'ADMIN', 'TEACHER'], <ProctorPlacementPage />)} />
 
         <Route path="/student" element={guard(['STUDENT'], <StudentDashboard />)} />
         <Route path="/student/tests" element={guard(['STUDENT'], <MyTests />)} />

@@ -43,7 +43,10 @@ import {
   Users,
 } from 'lucide-react';
 
+const SELECTION_ROUNDS = ['Resume Screening', 'Online Assessment', 'Technical Interview', 'HR Round'];
+
 const EMPTY_FORM = {
+  selectionProcess: SELECTION_ROUNDS.join(', '),
   companyName: '',
   role: '',
   description: '',
@@ -136,27 +139,41 @@ function BranchChips({ value, onChange }) {
   );
 }
 
-function ApplicantRow({ app, onSave }) {
+function ApplicantRow({ app, onSave, rounds = SELECTION_ROUNDS, showDrive = false }) {
   const p = app.student?.placementProfile;
+  const scoreOf = (a) => (a.assessmentScore ?? '') === '' ? '' : String(a.assessmentScore);
   const [status, setStatus] = useState(app.status);
+  const [round, setRound] = useState(app.currentRound || rounds[0]);
+  const [score, setScore] = useState(scoreOf(app));
   const [notes, setNotes] = useState(app.notes || '');
   const [saving, setSaving] = useState(false);
-  const dirty = status !== app.status || (notes || '') !== (app.notes || '');
+  const dirty =
+    status !== app.status ||
+    round !== (app.currentRound || rounds[0]) ||
+    score !== scoreOf(app) ||
+    (notes || '') !== (app.notes || '');
 
   useEffect(() => {
     setStatus(app.status);
+    setRound(app.currentRound || rounds[0]);
+    setScore(scoreOf(app));
     setNotes(app.notes || '');
-  }, [app.status, app.notes]);
+  }, [app.status, app.currentRound, app.assessmentScore, app.notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     setSaving(true);
-    await onSave(app.id, status, notes);
+    await onSave(app.id, { status, currentRound: round, assessmentScore: score === '' ? null : Number(score), notes });
     setSaving(false);
   };
 
   return (
     <tr className="align-top">
       <td className="py-3 pr-3">
+        {showDrive && app.drive && (
+          <div className="mb-1 text-[11px] font-semibold text-accent-ink">
+            {app.drive.companyName} · {app.drive.role}
+          </div>
+        )}
         <div className="font-semibold text-ink">{p?.fullName || app.student?.fullName || app.student?.username}</div>
         <div className="text-[11px] text-ink-subtle">{p?.rollNumber || '—'}</div>
         <div className="text-[11px] text-ink-subtle">{app.student?.email}</div>
@@ -214,6 +231,29 @@ function ApplicantRow({ app, onSave }) {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
+          <div className="flex gap-2">
+            <select
+              aria-label="Current selection round"
+              value={round}
+              onChange={(e) => setRound(e.target.value)}
+              className="input h-9 flex-1 text-xs"
+            >
+              {[...new Set([...rounds, 'Offer Released', round])].map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <input
+              aria-label="Assessment score (%)"
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              value={score}
+              onChange={(e) => setScore(e.target.value)}
+              placeholder="Score %"
+              className="input h-9 w-24 text-xs"
+            />
+          </div>
           <textarea
             aria-label="Notes for this applicant"
             rows={2}
@@ -257,6 +297,17 @@ export function AdminPlacementPage() {
   const [applicants, setApplicants] = useState([]);
   const [loadingApplicants, setLoadingApplicants] = useState(false);
   const [applicantFilter, setApplicantFilter] = useState('ALL');
+
+  // Candidates (every application) and student profile tabs
+  const [tab, setTab] = useState('drives');
+  const [candidates, setCandidates] = useState(null);
+  const [candidateDrive, setCandidateDrive] = useState('ALL');
+  const [candidateStatus, setCandidateStatus] = useState('ALL');
+  const [candidateSearch, setCandidateSearch] = useState('');
+  const [profiles, setProfiles] = useState(null);
+  const [profileSearch, setProfileSearch] = useState('');
+  const [profileBranch, setProfileBranch] = useState('ALL');
+  const [verifying, setVerifying] = useState(null);
 
   const toast = useToast();
 
@@ -305,6 +356,10 @@ export function AdminPlacementPage() {
       batchYear: drive.batchYear != null ? String(drive.batchYear) : '',
       ctcLpa: drive.ctcLpa != null ? String(drive.ctcLpa) : '',
       location: drive.location || '',
+      selectionProcess: (Array.isArray(drive.selectionProcess) && drive.selectionProcess.length
+        ? drive.selectionProcess
+        : SELECTION_ROUNDS
+      ).join(', '),
       deadline: toDateInput(drive.deadline),
       driveDate: toDateInput(drive.driveDate),
     });
@@ -337,6 +392,10 @@ export function AdminPlacementPage() {
       batchYear: numOrNull(formDrive.batchYear),
       ctcLpa: numOrNull(formDrive.ctcLpa),
       location: formDrive.location.trim() || null,
+      selectionProcess: formDrive.selectionProcess
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean),
       driveDate: formDrive.driveDate ? driveDateToIso(formDrive.driveDate) : null,
     };
     // Re-sending an unchanged deadline would shift it to end-of-day local time;
@@ -397,11 +456,50 @@ export function AdminPlacementPage() {
     }
   };
 
-  const handleUpdateApplicant = async (appId, status, notes) => {
+  const loadCandidates = async () => {
     try {
-      await api.patch(`/placements/applications/${appId}/status`, { status, notes });
-      toast.success(`Applicant moved to ${status}`);
+      const res = await api.get('/placements/proctor/candidates');
+      setCandidates(res.data?.data?.candidates || []);
+    } catch (err) {
+      toast.error(apiError(err, 'Failed to load candidates'));
+      setCandidates([]);
+    }
+  };
+
+  const loadProfiles = async () => {
+    try {
+      const res = await api.get('/placements/profiles');
+      setProfiles(res.data?.data?.profiles || []);
+    } catch (err) {
+      toast.error(apiError(err, 'Failed to load student profiles'));
+      setProfiles([]);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'candidates' && candidates === null) loadCandidates();
+    if (tab === 'profiles' && profiles === null) loadProfiles();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleVerifyProfile = async (profile, isVerified) => {
+    try {
+      setVerifying(profile.id);
+      await api.patch(`/placements/profiles/${profile.id}/verify`, { isVerified });
+      toast.success(`${profile.fullName} ${isVerified ? 'verified' : 'marked unverified'}`);
+      await loadProfiles();
+    } catch (err) {
+      toast.error(apiError(err, 'Failed to update profile'));
+    } finally {
+      setVerifying(null);
+    }
+  };
+
+  const handleUpdateApplicant = async (appId, changes) => {
+    try {
+      await api.patch(`/placements/applications/${appId}/status`, changes);
+      toast.success(`Applicant updated: ${changes.status} · ${changes.currentRound}`);
       if (viewingDrive) await fetchApplicants(viewingDrive.id);
+      if (candidates !== null) loadCandidates();
       loadData({ quiet: true });
     } catch (err) {
       toast.error(apiError(err, 'Failed to update applicant'));
@@ -470,7 +568,30 @@ export function AdminPlacementPage() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+      <div role="tablist" aria-label="Placement sections" className="inline-flex rounded-full p-1" style={{ backgroundColor: 'rgb(var(--fill) / var(--fill-alpha))' }}>
+        {[
+          ['drives', 'Drives', drives.length],
+          ['candidates', 'Candidates', stats?.totalApplications ?? null],
+          ['profiles', 'Student profiles', stats?.totalRegisteredStudents ?? null],
+        ].map(([id, label, count]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+              tab === id ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:text-ink'
+            }`}
+          >
+            {label}
+            {count != null && <span className="ml-1.5 text-xs text-ink-subtle">{count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'drives' && (
+      <div className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-ink">Recruitment drives</h3>
@@ -612,6 +733,189 @@ export function AdminPlacementPage() {
           </div>
         )}
       </div>
+      )}
+
+      {tab === 'candidates' && (
+        <div className="card p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-ink">All candidates</h3>
+              <p className="text-xs text-ink-muted">
+                Every application across drives. Move candidates between rounds, record test scores and decisions.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search candidates"
+                  placeholder="Name, roll no., email…"
+                  value={candidateSearch}
+                  onChange={(e) => setCandidateSearch(e.target.value)}
+                  className="input h-9 w-56 pl-9 text-xs"
+                />
+              </div>
+              <select aria-label="Filter by drive" value={candidateDrive} onChange={(e) => setCandidateDrive(e.target.value)} className="input h-9 w-48 text-xs">
+                <option value="ALL">All drives</option>
+                {drives.map((d) => (
+                  <option key={d.id} value={d.id}>{d.companyName} · {d.role}</option>
+                ))}
+              </select>
+              <select aria-label="Filter by status" value={candidateStatus} onChange={(e) => setCandidateStatus(e.target.value)} className="input h-9 w-36 text-xs">
+                <option value="ALL">All statuses</option>
+                {APPLICATION_STATUSES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {candidates === null ? (
+            <Spinner label="Loading candidates…" />
+          ) : (
+            (() => {
+              const q = candidateSearch.trim().toLowerCase();
+              const rows = candidates.filter((c) => {
+                if (candidateDrive !== 'ALL' && c.driveId !== candidateDrive) return false;
+                if (candidateStatus !== 'ALL' && c.status !== candidateStatus) return false;
+                if (!q) return true;
+                const p = c.student?.placementProfile;
+                return [p?.fullName, p?.rollNumber, c.student?.fullName, c.student?.email, c.drive?.companyName].some((v) =>
+                  v?.toLowerCase().includes(q),
+                );
+              });
+              if (rows.length === 0) return <p className="py-10 text-center text-sm text-ink-muted">No candidates match these filters.</p>;
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-[11px] text-ink-subtle">
+                        <th className="pb-3 pr-3 font-semibold">Candidate</th>
+                        <th className="pb-3 pr-3 font-semibold">Academics</th>
+                        <th className="pb-3 pr-3 font-semibold">Links</th>
+                        <th className="pb-3 pr-3 font-semibold">Applied</th>
+                        <th className="pb-3 font-semibold">Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {rows.map((c) => (
+                        <ApplicantRow
+                          key={c.id}
+                          app={c}
+                          showDrive
+                          rounds={
+                            Array.isArray(c.drive?.selectionProcess) && c.drive.selectionProcess.length
+                              ? c.drive.selectionProcess
+                              : SELECTION_ROUNDS
+                          }
+                          onSave={handleUpdateApplicant}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()
+          )}
+        </div>
+      )}
+
+      {tab === 'profiles' && (
+        <div className="card p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-ink">Student placement profiles</h3>
+              <p className="text-xs text-ink-muted">Check each student's academic record and verify it before they apply.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search profiles"
+                  placeholder="Name or roll no.…"
+                  value={profileSearch}
+                  onChange={(e) => setProfileSearch(e.target.value)}
+                  className="input h-9 w-56 pl-9 text-xs"
+                />
+              </div>
+              <select aria-label="Filter by branch" value={profileBranch} onChange={(e) => setProfileBranch(e.target.value)} className="input h-9 w-48 text-xs">
+                <option value="ALL">All branches</option>
+                {BRANCHES.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {profiles === null ? (
+            <Spinner label="Loading profiles…" />
+          ) : (
+            (() => {
+              const q = profileSearch.trim().toLowerCase();
+              const rows = profiles.filter((p) => {
+                if (profileBranch !== 'ALL' && (canonicalBranch(p.branch) || p.branch) !== profileBranch) return false;
+                return !q || [p.fullName, p.rollNumber, p.user?.email].some((v) => v?.toLowerCase().includes(q));
+              });
+              if (rows.length === 0) return <p className="py-10 text-center text-sm text-ink-muted">No profiles match these filters.</p>;
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-[11px] text-ink-subtle">
+                        <th className="pb-3 pr-3 font-semibold">Student</th>
+                        <th className="pb-3 pr-3 font-semibold">Branch</th>
+                        <th className="pb-3 pr-3 font-semibold">CGPA</th>
+                        <th className="pb-3 pr-3 font-semibold">10th / 12th</th>
+                        <th className="pb-3 pr-3 font-semibold">Backlogs</th>
+                        <th className="pb-3 pr-3 font-semibold">Batch</th>
+                        <th className="pb-3 pr-3 font-semibold">Resume</th>
+                        <th className="pb-3 text-right font-semibold">Verification</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {rows.map((p) => (
+                        <tr key={p.id} className="align-middle">
+                          <td className="py-3 pr-3">
+                            <div className="font-semibold text-ink">{p.fullName}</div>
+                            <div className="text-[11px] text-ink-subtle">{p.rollNumber || '—'} · {p.user?.email}</div>
+                          </td>
+                          <td className="py-3 pr-3">{p.branch || '—'}</td>
+                          <td className="py-3 pr-3 font-semibold text-ink">{p.cgpa}</td>
+                          <td className="py-3 pr-3">{p.tenthPercentage ?? '—'}% / {p.twelfthPercentage ?? '—'}%</td>
+                          <td className="py-3 pr-3">{p.activeBacklogs ?? 0}</td>
+                          <td className="py-3 pr-3">{p.graduationYear ?? '—'}</td>
+                          <td className="py-3 pr-3">
+                            {p.resumeUrl ? (
+                              <a href={p.resumeUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-accent-ink hover:underline">
+                                <FileText className="h-3 w-3" /> View
+                              </a>
+                            ) : (
+                              <span className="text-ink-subtle">—</span>
+                            )}
+                          </td>
+                          <td className="py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Badge tone={p.isVerified ? 'positive' : 'caution'}>{p.isVerified ? 'Verified' : 'Pending'}</Badge>
+                              <Button
+                                size="sm"
+                                variant={p.isVerified ? 'secondary' : 'primary'}
+                                loading={verifying === p.id}
+                                onClick={() => handleVerifyProfile(p, !p.isVerified)}
+                              >
+                                {p.isVerified ? 'Unverify' : 'Verify'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()
+          )}
+        </div>
+      )}
 
       {/* CREATE / EDIT DRIVE */}
       <Modal
@@ -654,6 +958,10 @@ export function AdminPlacementPage() {
               <input id="pd-loc" className="input" value={formDrive.location} onChange={set('location')} placeholder="e.g. Bengaluru / Hybrid" maxLength={200} />
             </Field>
           </div>
+
+          <Field label="Selection rounds" hint="Comma separated, in order" htmlFor="pd-rounds">
+            <input id="pd-rounds" className="input" value={formDrive.selectionProcess} onChange={set('selectionProcess')} placeholder="Resume Screening, Online Assessment, Technical Interview, HR Round" maxLength={600} />
+          </Field>
 
           <fieldset className="rounded-xl border border-line bg-canvas p-4">
             <legend className="px-1 text-xs font-bold uppercase tracking-wider text-ink-muted">Eligibility criteria</legend>
@@ -770,7 +1078,16 @@ export function AdminPlacementPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {visibleApplicants.map((app) => (
-                    <ApplicantRow key={app.id} app={app} onSave={handleUpdateApplicant} />
+                    <ApplicantRow
+                      key={app.id}
+                      app={app}
+                      rounds={
+                        Array.isArray(viewingDrive?.selectionProcess) && viewingDrive.selectionProcess.length
+                          ? viewingDrive.selectionProcess
+                          : SELECTION_ROUNDS
+                      }
+                      onSave={handleUpdateApplicant}
+                    />
                   ))}
                 </tbody>
               </table>
